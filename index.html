@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-cn">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Bloomery</title>
+        <!-- 首帧启动页，早于 JS 与样式表 -->
+        <style>
+            html,
+            body {
+                height: 100%;
+                margin: 0;
+                background-color: #ef323d;
+            }
+
+            #boot-splash {
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+
+                background-color: #ef323d;
+                color: #ffffff;
+                font-family: system-ui, sans-serif;
+            }
+
+            #boot-splash p {
+                margin: 0;
+            }
+
+            #boot-splash .title {
+                font-size: 2rem;
+                font-weight: 600;
+            }
+
+            #boot-splash .subtitle {
+                font-size: 1.1rem;
+            }
+        </style>
+    </head>
+
+    <body>
+        <!-- 首帧占位，Vue 挂载后移除 -->
+        <div id="boot-splash" aria-hidden="true">
+            <p class="title">Bloomery Launcher</p>
+            <p class="subtitle">Etheros Group</p>
+        </div>
+
+        <div id="app"></div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

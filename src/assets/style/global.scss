@@ -1,0 +1,46 @@
+* {
+    font-family: 'default', sans-serif;
+    box-sizing: border-box;
+    caret-color: var(--text-color);
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+html,
+body {
+    min-height: 100vh;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    scroll-behavior: smooth;
+}
+
+html {
+    font-size: 1rem;
+}
+
+body {
+    color: var(--text-color);
+
+    background-color: var(--bg-color);
+}
+
+a {
+    color: var(--text-color);
+}
+
+p {
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --border-radius: 12px;
+    --transition-duration: 0.25s;
+    --transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -1,0 +1,48 @@
+@mixin light-tokens {
+    --bg-color: #ffffff;
+    --app-background-veil-color: #ffffff;
+    --bg-color-dark: #f2f2f2;
+    --bg-opposite: #1a1a1a;
+    --bg-opposite-dark: #242424;
+    --text-color: #000000;
+    --text-color-dark: #3c3c3c;
+    --text-color-opposite: #ffffff;
+    --button-bg-color: #e6e6e6;
+    --button-bg-color-dark: #d4d4d4;
+    /* 分组：头部比展开区深一层 */
+    --group-header-bg: #e6e6e6;
+    --group-content-bg: #f2f2f2;
+}
+
+@mixin dark-tokens {
+    --bg-color: #1a1a1a;
+    --app-background-veil-color: #000000;
+    --bg-color-dark: #242424;
+    --bg-opposite: #ffffff;
+    --bg-opposite-dark: #f2f2f2;
+    --text-color: #ffffff;
+    --text-color-dark: #a6a6a6;
+    --text-color-opposite: #000000;
+    --button-bg-color: #333333;
+    --button-bg-color-dark: #3d3d3d;
+    --group-header-bg: #242424;
+    --group-content-bg: #333333;
+}
+
+:root {
+    @include light-tokens;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        @include dark-tokens;
+    }
+}
+
+:root[data-theme='light'] {
+    @include light-tokens;
+}
+
+:root[data-theme='dark'] {
+    @include dark-tokens;
+}
