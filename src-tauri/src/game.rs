@@ -145,16 +145,23 @@ fn marker_in_log(path: &str) -> Option<String> {
 /// Wayland 下没有全局窗口列表，X11 枚举也看不到原生 Wayland 窗口，所以窗口判定以游戏日志为准；
 /// Windows 上再补一条按窗口类枚举的路，与 PCL 的做法一致
 #[tauri::command]
-pub fn game_status(pid: Option<u32>, log: Option<String>) -> GameStatus {
+pub fn game_status(pid: Option<u32>, logs: Option<Vec<String>>) -> GameStatus {
     let alive = pid.map(|value| process_alive(value).unwrap_or(false));
 
-    if let Some(path) = log.as_deref() {
-        if let Some(line) = marker_in_log(path) {
-            return GameStatus {
-                alive,
-                window_ready: true,
-                evidence: line,
-            };
+    // 依次看多个日志：CLI 捕获的 stdout 与游戏自己的 latest.log，任一带标志行即算窗口出现
+    if let Some(paths) = logs.as_deref() {
+        for path in paths {
+            if let Some(line) = marker_in_log(path) {
+                let name = Path::new(path)
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+                return GameStatus {
+                    alive,
+                    window_ready: true,
+                    evidence: format!("{name} · {line}"),
+                };
+            }
         }
     }
 
@@ -199,16 +206,36 @@ mod tests {
             "[17:28:04] [Render thread/INFO]: Setting user: XiangYuanHuLian\n\
              [17:28:04] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot\n",
         );
-        let status = game_status(None, Some(path.to_string_lossy().to_string()));
+        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]));
         assert!(status.window_ready);
         assert!(status.evidence.contains("Backend library"));
         let _ = fs::remove_file(path);
     }
 
     #[test]
+    fn finds_marker_in_second_log() {
+        let first = write_log("empty", "[17:28:00] [main/INFO]: Loading Minecraft\n");
+        let second = write_log(
+            "second",
+            "[17:28:04] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot\n",
+        );
+        let status = game_status(
+            None,
+            Some(vec![
+                first.to_string_lossy().to_string(),
+                second.to_string_lossy().to_string(),
+            ]),
+        );
+        assert!(status.window_ready);
+        assert!(status.evidence.contains("Backend library"));
+        let _ = fs::remove_file(first);
+        let _ = fs::remove_file(second);
+    }
+
+    #[test]
     fn no_marker_before_window() {
         let path = write_log("before", "[17:28:00] [main/INFO]: Loading Minecraft 1.20.1\n");
-        let status = game_status(None, Some(path.to_string_lossy().to_string()));
+        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]));
         assert!(!status.window_ready);
         assert!(status.evidence.contains("还没有窗口标志行"));
         let _ = fs::remove_file(path);
@@ -216,7 +243,7 @@ mod tests {
 
     #[test]
     fn missing_log_is_not_ready() {
-        let status = game_status(Some(u32::MAX), Some("/nonexistent/game.log".to_string()));
+        let status = game_status(Some(u32::MAX), Some(vec!["/nonexistent/game.log".to_string()]));
         assert!(!status.window_ready);
         assert_eq!(status.alive, Some(false));
     }

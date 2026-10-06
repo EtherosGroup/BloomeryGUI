@@ -10,6 +10,6 @@ export interface GameStatus {
 }
 
 /** 查询游戏进程与窗口状态 */
-export async function gameStatus(pid: number | null, log: string | null): Promise<GameStatus> {
-    return await invoke<GameStatus>('game_status', { pid, log })
+export async function gameStatus(pid: number | null, logs: string[] | null): Promise<GameStatus> {
+    return await invoke<GameStatus>('game_status', { pid, logs })
 }

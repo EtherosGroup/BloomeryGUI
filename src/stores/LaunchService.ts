@@ -95,6 +95,11 @@ export const useLaunchService = defineStore(
                 : { code: 'Unknown', message: String(error), detail: null, retryable: false }
         }
 
+        /** 游戏目录：用于读游戏自己的日志 */
+        const gameDirectory = ref('')
+        /** 轮询次数，用于诊断心跳 */
+        let pollTicks = 0
+
         let pollTimer: number | undefined
 
         function stopPolling(): void {
@@ -104,6 +109,10 @@ export const useLaunchService = defineStore(
             }
         }
 
+        /**
+         * 轮询：窗口标志行出现即算完成
+         * 日志看两处 —— CLI 捕获的游戏 stdout，以及游戏自己的 <游戏目录>/logs/latest.log
+         */
         /** 每秒问一次进程与日志：窗口标志行出现即算拉起完成 */
         function startPolling(): void {
             stopPolling()
@@ -111,7 +120,12 @@ export const useLaunchService = defineStore(
                 try {
                     const status = await gameStatus(
                         pid.value,
-                        logPath.value.length > 0 ? logPath.value : null,
+                        [
+                            logPath.value,
+                            gameDirectory.value.length > 0
+                                ? `${gameDirectory.value}/logs/latest.log`
+                                : '',
+                        ].filter((entry) => entry.length > 0),
                     )
                     if (status.evidence !== windowEvidence.value) {
                         trace(
@@ -123,15 +137,22 @@ export const useLaunchService = defineStore(
                             status.windowReady,
                         )
                     }
+                    pollTicks += 1
+                    // 每约 15 秒记一次心跳，避免"只在变化时记录"丢掉时间线
+                    if (pollTicks % 10 === 0) {
+                        trace('窗口轮询心跳', windowEvidence.value, 'alive=', status.alive)
+                    }
                     windowEvidence.value = status.evidence
                     if (status.windowReady) {
                         setStep('window', 'done')
                         stopPolling()
+                        trace('窗口就绪', status.evidence)
                         return
                     }
                     if (status.alive === false) {
                         setStep('window', 'failed')
                         stopPolling()
+                        trace('进程已退出，轮询停止', status.evidence)
                     }
                 } catch (error) {
                     windowEvidence.value = error instanceof Error ? error.message : String(error)
@@ -152,7 +173,7 @@ export const useLaunchService = defineStore(
                 if (scope.length > 0) {
                     args.push('--folder', scope)
                 }
-                trace('launch 目标=', target, '文件夹=', scope, '参数=', args.join(' '))
+                trace('launch 计划（dry-run）', args.join(' '))
 
                 const result = await client.run<CliLaunchResult>(args, { progress: false })
                 plan.value = result
@@ -188,7 +209,8 @@ export const useLaunchService = defineStore(
                 if (scope.length > 0) {
                     args.push('--folder', scope)
                 }
-                const result = await client.run<CliLaunchResult>(args, {
+                const result = await trace('launch 命令', args.join(' '))
+                client.run<CliLaunchResult>(args, {
                     id,
                     onStderrLine: (line) => trace('cli stderr', line),
                     onProgress: (event) => {
@@ -197,6 +219,7 @@ export const useLaunchService = defineStore(
                 })
                 pid.value = result.pid ?? null
                 logPath.value = result.log ?? ''
+                gameDirectory.value = result.directory ?? ''
                 trace('launch 返回 pid=', result.pid ?? null, 'log=', result.log ?? '(无)')
                 setStep('repair', 'done')
                 setStep('spawn', 'done')
