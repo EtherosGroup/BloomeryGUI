@@ -183,9 +183,10 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn write_log(lines: &str) -> std::path::PathBuf {
+    /// 每个用例用独立文件名：并行执行时共用同一路径会互相覆盖
+    fn write_log(name: &str, lines: &str) -> std::path::PathBuf {
         let mut path = std::env::temp_dir();
-        path.push(format!("bloomery-log-{}.log", std::process::id()));
+        path.push(format!("bloomery-log-{}-{}.log", name, std::process::id()));
         let mut file = fs::File::create(&path).unwrap();
         file.write_all(lines.as_bytes()).unwrap();
         path
@@ -194,6 +195,7 @@ mod tests {
     #[test]
     fn finds_window_marker() {
         let path = write_log(
+            "marker",
             "[17:28:04] [Render thread/INFO]: Setting user: XiangYuanHuLian\n\
              [17:28:04] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot\n",
         );
@@ -205,7 +207,7 @@ mod tests {
 
     #[test]
     fn no_marker_before_window() {
-        let path = write_log("[17:28:00] [main/INFO]: Loading Minecraft 1.20.1\n");
+        let path = write_log("before", "[17:28:00] [main/INFO]: Loading Minecraft 1.20.1\n");
         let status = game_status(None, Some(path.to_string_lossy().to_string()));
         assert!(!status.window_ready);
         assert!(status.evidence.contains("还没有窗口标志行"));
