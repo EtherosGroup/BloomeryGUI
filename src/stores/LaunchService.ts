@@ -69,7 +69,6 @@ export const useLaunchService = defineStore(
             pid.value = null
             windowReadyOnce = false
             logPath.value = ''
-            windowReadyOnce = false
             windowEvidence.value = ''
             events.value = []
             failure.value = null

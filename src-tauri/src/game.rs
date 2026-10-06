@@ -163,6 +163,8 @@ fn marker_in_log(path: &str) -> Option<String> {
 ///
 /// Wayland 下没有全局窗口列表，X11 枚举也看不到原生 Wayland 窗口，所以窗口判定以游戏日志为准；
 /// Windows 上再补一条按窗口类枚举的路，与 PCL 的做法一致
+/// focus 只在 Windows 分支使用：窗口出现后由界面代为带到前台
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 #[tauri::command]
 pub fn game_status(
     pid: Option<u32>,
