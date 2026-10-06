@@ -129,7 +129,16 @@ jobs:
                   mkdir -p release
                   case "${{ matrix.platform }}" in
                     windows-x64)
-                      cp "src-tauri/target/release/bundle/msi/bloomery-gui_${version}_x64_en-US.msi" "release/bloomery-gui-${version}-windows-x64.msi"
+                      # 多语言 msi：文件名后缀即语言码，逐个归置
+                      for msi in src-tauri/target/release/bundle/msi/*.msi; do
+                        base="$(basename "$msi")"
+                        lang="$(printf '%s' "$base" | sed -E "s/^bloomery-gui_${version}_x64_(.*)[.]msi$/\1/")"
+                        if [ "$lang" = "$base" ]; then
+                          echo "错误：无法从 $base 解析语言码"
+                          exit 1
+                        fi
+                        cp "$msi" "release/bloomery-gui-${version}-windows-x64-${lang}.msi"
+                      done
                       cp "src-tauri/target/release/bundle/nsis/bloomery-gui_${version}_x64-setup.exe" "release/bloomery-gui-${version}-windows-x64-setup.exe"
                       ;;
                     linux-x64)
@@ -147,7 +156,8 @@ jobs:
                   case "${{ matrix.platform }}" in
                     windows-x64)
                       expected=(
-                        "release/bloomery-gui-${version}-windows-x64.msi"
+                        "release/bloomery-gui-${version}-windows-x64-zh-CN.msi"
+                        "release/bloomery-gui-${version}-windows-x64-en-US.msi"
                         "release/bloomery-gui-${version}-windows-x64-setup.exe"
                         "release/bloomery-gui-${version}-windows-x64-portable.zip"
                       )
@@ -302,7 +312,8 @@ jobs:
                   set -euo pipefail
                   version="${TAG#v}"
                   expected=(
-                    "bloomery-gui-${version}-windows-x64.msi"
+                    "bloomery-gui-${version}-windows-x64-zh-CN.msi"
+                    "bloomery-gui-${version}-windows-x64-en-US.msi"
                     "bloomery-gui-${version}-windows-x64-setup.exe"
                     "bloomery-gui-${version}-windows-x64-portable.zip"
                     "bloomery-gui-${version}-linux-x64.deb"
