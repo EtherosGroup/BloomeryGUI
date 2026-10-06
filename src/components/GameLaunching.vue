@@ -4,6 +4,10 @@ import { PhArrowRight, PhCheck, PhWarning } from '@phosphor-icons/vue'
 import GroupButton from '@/components/GroupButton.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { accountTypeLabel } from '@/utils/accountAvatar'
+import { diagInfo } from '@/api/diagnostics'
+import { readTextFile } from '@/api/files'
+import { copyText } from '@/utils/clipboard'
+import { notifyError, notifySuccess } from '@/utils/notify'
 import { useLaunchService } from '@/stores/LaunchService'
 import { useAccountService } from '@/stores/AccountService'
 
@@ -19,6 +23,23 @@ const accountText = computed(() => {
     const selected = accountService.selected
     return selected === null ? '未登录' : `${selected.name}（${accountTypeLabel(selected.type)}）`
 })
+
+/** 复制诊断：读诊断文件尾部并写剪贴板 */
+async function copyDiag(): Promise<void> {
+    try {
+        const info = await diagInfo()
+        const offset = Math.max(0, info.size - 32 * 1024)
+        const text = await readTextFile(info.path, offset)
+        const done = await copyText(`诊断文件：${info.path}\n\n${text}`)
+        if (done) {
+            notifySuccess('诊断已复制')
+        } else {
+            notifyError('复制失败')
+        }
+    } catch (error) {
+        notifyError(`读取诊断失败 · ${String(error)}`)
+    }
+}
 
 const visible = computed(() => launch.active && launch.steps.length > 0)
 
@@ -116,6 +137,9 @@ onBeforeUnmount(() => {
                     进程 PID {{ launch.pid }}
                     <template v-if="launch.windowEvidence"> · {{ launch.windowEvidence }}</template>
                 </p>
+                <GroupButton variant="ghost" class="launching__diag" @click="copyDiag">
+                    复制诊断
+                </GroupButton>
 
                 <footer class="launching__actions">
                     <GroupButton v-if="launch.busy" variant="ghost" @click="launch.cancel">
@@ -258,6 +282,10 @@ onBeforeUnmount(() => {
 
 .launching__label {
     word-break: break-all;
+}
+
+.launching__diag {
+    align-self: flex-start;
 }
 
 .launching__progress {

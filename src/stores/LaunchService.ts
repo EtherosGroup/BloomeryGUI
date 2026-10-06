@@ -2,11 +2,18 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { killCli } from '@/api/transport.tauri'
+import { appendDiag } from '@/api/diagnostics'
 import { gameStatus } from '@/api/game'
 import type { CliLaunchResult, CliProgressEvent } from '@/api/types'
 import { useCli } from '@/composables/useCli'
 
 export type LaunchStepState = 'pending' | 'current' | 'done' | 'failed'
+
+/** 诊断行：带时间戳写入应用数据目录的 diag.log，写失败不影响主流程 */
+function trace(...parts: unknown[]): void {
+    const line = `[${new Date().toISOString()}] ${parts.map((part) => String(part)).join(' ')}`
+    void appendDiag([line])
+}
 
 export interface LaunchStep {
     key: string
@@ -106,6 +113,16 @@ export const useLaunchService = defineStore(
                         pid.value,
                         logPath.value.length > 0 ? logPath.value : null,
                     )
+                    if (status.evidence !== windowEvidence.value) {
+                        trace(
+                            '窗口轮询',
+                            status.evidence,
+                            'alive=',
+                            status.alive,
+                            'ready=',
+                            status.windowReady,
+                        )
+                    }
                     windowEvidence.value = status.evidence
                     if (status.windowReady) {
                         setStep('window', 'done')
@@ -135,6 +152,8 @@ export const useLaunchService = defineStore(
                 if (scope.length > 0) {
                     args.push('--folder', scope)
                 }
+                trace('launch 目标=', target, '文件夹=', scope, '参数=', args.join(' '))
+
                 const result = await client.run<CliLaunchResult>(args, { progress: false })
                 plan.value = result
                 return result
@@ -171,12 +190,14 @@ export const useLaunchService = defineStore(
                 }
                 const result = await client.run<CliLaunchResult>(args, {
                     id,
+                    onStderrLine: (line) => trace('cli stderr', line),
                     onProgress: (event) => {
                         events.value = [...events.value, event].slice(-200)
                     },
                 })
                 pid.value = result.pid ?? null
                 logPath.value = result.log ?? ''
+                trace('launch 返回 pid=', result.pid ?? null, 'log=', result.log ?? '(无)')
                 setStep('repair', 'done')
                 setStep('spawn', 'done')
                 setStep('window', 'current')
@@ -187,6 +208,16 @@ export const useLaunchService = defineStore(
                 setStep('repair', state)
                 if (!cancelled.value) {
                     failure.value = toFailure(error)
+                    trace(
+                        '启动失败 code=',
+                        failure.value?.code,
+                        'message=',
+                        failure.value?.message,
+                        'detail=',
+                        failure.value?.detail ?? '(无)',
+                        'retryable=',
+                        failure.value?.retryable,
+                    )
                 }
                 return false
             } finally {

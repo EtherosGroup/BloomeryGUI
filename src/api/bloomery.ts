@@ -44,6 +44,8 @@ export interface CliTransport {
 export interface CliRunOptions {
     /** 调用方指定，用于 killCli 取消 */
     id?: string
+    /** stderr 逐行回调 */
+    onStderrLine?: (line: string) => void
     /** stdout 逐行回调 */
     onStdoutLine?: (line: string) => void
     /** 输出为多行 NDJSON 时跳过整体 JSON 解析，直接返回原始 stdout */
@@ -201,14 +203,16 @@ export class BloomeryClient {
                 id: options.id,
                 args,
                 onStdoutLine: options.onStdoutLine,
-                onStderrLine: onProgress
-                    ? (line) => {
-                          const event = parseProgressLine(line)
-                          if (event) {
-                              onProgress(event)
-                          }
-                      }
-                    : undefined,
+                // 原始 stderr 与进度解析共用一个回调，两者都要
+                onStderrLine: (line) => {
+                    options.onStderrLine?.(line)
+                    if (onProgress) {
+                        const event = parseProgressLine(line)
+                        if (event) {
+                            onProgress(event)
+                        }
+                    }
+                },
             })
         } catch (cause) {
             throw new BloomeryError(LOCAL_ERROR_CODE.spawnFailed, '无法启动 bloomery', {

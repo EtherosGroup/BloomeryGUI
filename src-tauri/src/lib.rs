@@ -1,6 +1,7 @@
 mod background;
 mod cli;
 mod files;
+mod diag;
 mod game;
 mod program;
 mod system;
@@ -27,6 +28,8 @@ pub fn run() {
             files::read_text_file,
             game::game_status,
             program::run_program,
+            diag::append_diag,
+            diag::diag_info,
             program::system_facts,
             program::download_file
         ])

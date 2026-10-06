@@ -91,7 +91,7 @@ jobs:
               if: runner.os == 'Linux'
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+                  sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils desktop-file-utils
 
             # Rust 工具链
             - uses: dtolnay/rust-toolchain@stable
@@ -148,6 +148,24 @@ jobs:
                   ls -l release/
 
             # 产物清单核对：少一个即整个失败
+            # 桌面入口：格式用官方校验器，内容逐行比对（校验器不管值）
+            - name: 校验桌面入口
+              if: matrix.platform == 'linux-x64'
+              run: |
+                  set -euo pipefail
+                  version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+                  deb="src-tauri/target/release/bundle/deb/bloomery-gui_${version}_amd64.deb"
+                  test -f "$deb" || { echo "错误：找不到 deb：$deb"; exit 1; }
+                  rm -rf /tmp/debcheck && mkdir -p /tmp/debcheck
+                  dpkg-deb -x "$deb" /tmp/debcheck
+                  entry="/tmp/debcheck/usr/share/applications/bloomery-gui.desktop"
+                  test -f "$entry" || { echo "错误：deb 内没有桌面入口"; exit 1; }
+                  desktop-file-validate "$entry"
+                  grep -qx "Categories=Utility;" "$entry" || { echo "错误：Categories 不是 Categories=Utility;"; exit 1; }
+                  grep -qx "Comment=Minecraft 启动器" "$entry" || { echo "错误：Comment 不符"; exit 1; }
+                  grep -qx "Name=Bloomery" "$entry" || { echo "错误：Name 不符"; exit 1; }
+                  echo "桌面入口校验通过"
+
             - name: 核对产物清单
               shell: bash
               run: |
