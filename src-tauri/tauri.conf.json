@@ -30,6 +30,14 @@
     "bundle": {
         "active": true,
         "targets": "all",
+        "category": "Utility",
+        "shortDescription": "Minecraft 启动器",
+        "longDescription": "基于 Bloomery 引擎的 Minecraft 图形启动器",
+        "linux": {
+            "deb": {
+                "section": "utils"
+            }
+        },
         "windows": {
             "nsis": {
                 "languages": ["SimpChinese", "English"],
