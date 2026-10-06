@@ -34,7 +34,7 @@ fn process_alive(pid: u32) -> Option<bool> {
 fn process_alive(pid: u32) -> Option<bool> {
     // 走统一构造：Windows 下不弹控制台（此处每 1.5 秒被轮询一次）
     #[cfg(windows)]
-    let output = crate::program::build_command(
+    let output = std::process::Command::new(
         "tasklist",
         &["/FI".to_string(), format!("PID eq {pid}"), "/NH".to_string()],
     )

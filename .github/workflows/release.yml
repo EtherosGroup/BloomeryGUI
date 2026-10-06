@@ -52,9 +52,9 @@ jobs:
                   cache: pnpm
 
             # 版本一致性门禁：两份版本号互等，推标签时还等于标签
-            # 回归自检：错误信封真字节 + bundle.icon 与磁盘一致性
+            # 回归自检：错误信封真字节 + bundle.icon 与磁盘一致性 + 起进程入口
             - name: 错误信封自检
-              run: pnpm run check:errors && pnpm run check:icons
+              run: pnpm run check:errors && pnpm run check:icons && pnpm run check:spawns
 
             - name: 版本一致性门禁
               shell: bash
