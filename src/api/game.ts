@@ -10,6 +10,11 @@ export interface GameStatus {
 }
 
 /** 查询游戏进程与窗口状态 */
-export async function gameStatus(pid: number | null, logs: string[] | null): Promise<GameStatus> {
-    return await invoke<GameStatus>('game_status', { pid, logs })
+/** focus：窗口首次出现时把游戏带到前台（每次启动只该传一次 true） */
+export async function gameStatus(
+    pid: number | null,
+    logs: string[] | null,
+    focus = false,
+): Promise<GameStatus> {
+    return await invoke<GameStatus>('game_status', { pid, logs, focus })
 }

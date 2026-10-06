@@ -47,7 +47,7 @@ fn process_alive(pid: u32) -> Option<bool> {
 
 /// Windows 下按窗口类找游戏窗口，类名由 GLFW/LWJGL 注册
 #[cfg(windows)]
-fn window_by_class(classes: &[&str]) -> Option<String> {
+fn window_by_class(classes: &[&str], bring_to_front: bool) -> Option<String> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
 
@@ -57,15 +57,24 @@ fn window_by_class(classes: &[&str]) -> Option<String> {
         fn GetClassNameW(window: isize, buffer: *mut u16, max: i32) -> i32;
         fn GetWindowTextW(window: isize, buffer: *mut u16, max: i32) -> i32;
         fn IsWindowVisible(window: isize) -> i32;
+        fn SetForegroundWindow(window: isize) -> i32;
+        fn ShowWindow(window: isize, command: i32) -> i32;
     }
+
+    /// SW_RESTORE：还原被最小化的窗口
+    const SW_RESTORE: i32 = 9;
 
     struct Found {
         title: String,
+        /// 命中窗口的句柄，只有需要带到前台时才读
+        #[allow(dead_code)]
+        window: isize,
     }
 
     /// 枚举回调是 fn item，捕获不了外部变量，类名列表与结果一并由 param 传入
     struct Context<'a> {
         classes: &'a [&'a str],
+        bring_to_front: bool,
         found: Found,
     }
 
@@ -100,24 +109,34 @@ fn window_by_class(classes: &[&str]) -> Option<String> {
                 class
             };
             context.found.title = title;
+            context.found.window = window;
             0
         }
     }
 
     let mut context = Context {
         classes,
+        bring_to_front,
         found: Found {
             title: String::new(),
+            window: 0,
         },
     };
     unsafe {
         EnumWindows(visit, &mut context as *mut Context as isize);
     }
     if context.found.title.is_empty() {
-        None
-    } else {
-        Some(context.found.title)
+        return None;
     }
+    // 窗口已出现却落在别的窗口后面：游戏建窗往往在启动器退出之后，
+    // 此时它已不被允许自行抢前台，由仍在前台的界面代劳
+    if bring_to_front {
+        unsafe {
+            ShowWindow(context.found.window, SW_RESTORE);
+            SetForegroundWindow(context.found.window);
+        }
+    }
+    Some(context.found.title)
 }
 
 /// 扫日志尾部找窗口标志行，返回命中的那一行
@@ -145,7 +164,11 @@ fn marker_in_log(path: &str) -> Option<String> {
 /// Wayland 下没有全局窗口列表，X11 枚举也看不到原生 Wayland 窗口，所以窗口判定以游戏日志为准；
 /// Windows 上再补一条按窗口类枚举的路，与 PCL 的做法一致
 #[tauri::command]
-pub fn game_status(pid: Option<u32>, logs: Option<Vec<String>>) -> GameStatus {
+pub fn game_status(
+    pid: Option<u32>,
+    logs: Option<Vec<String>>,
+    focus: Option<bool>,
+) -> GameStatus {
     let alive = pid.map(|value| process_alive(value).unwrap_or(false));
 
     // 依次看多个日志：CLI 捕获的 stdout 与游戏自己的 latest.log，任一带标志行即算窗口出现
@@ -166,7 +189,7 @@ pub fn game_status(pid: Option<u32>, logs: Option<Vec<String>>) -> GameStatus {
     }
 
     #[cfg(windows)]
-    if let Some(title) = window_by_class(&["LWJGL", "GLFW30", "GLFW"]) {
+    if let Some(title) = window_by_class(&["LWJGL", "GLFW30", "GLFW"], focus.unwrap_or(false)) {
         return GameStatus {
             alive,
             window_ready: true,
@@ -206,7 +229,7 @@ mod tests {
             "[17:28:04] [Render thread/INFO]: Setting user: XiangYuanHuLian\n\
              [17:28:04] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot\n",
         );
-        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]));
+        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]), None);
         assert!(status.window_ready);
         assert!(status.evidence.contains("Backend library"));
         let _ = fs::remove_file(path);
@@ -225,6 +248,7 @@ mod tests {
                 first.to_string_lossy().to_string(),
                 second.to_string_lossy().to_string(),
             ]),
+            None,
         );
         assert!(status.window_ready);
         assert!(status.evidence.contains("Backend library"));
@@ -235,7 +259,7 @@ mod tests {
     #[test]
     fn no_marker_before_window() {
         let path = write_log("before", "[17:28:00] [main/INFO]: Loading Minecraft 1.20.1\n");
-        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]));
+        let status = game_status(None, Some(vec![path.to_string_lossy().to_string()]), None);
         assert!(!status.window_ready);
         assert!(status.evidence.contains("还没有窗口标志行"));
         let _ = fs::remove_file(path);
@@ -243,7 +267,7 @@ mod tests {
 
     #[test]
     fn missing_log_is_not_ready() {
-        let status = game_status(Some(u32::MAX), Some(vec!["/nonexistent/game.log".to_string()]));
+        let status = game_status(Some(u32::MAX), Some(vec!["/nonexistent/game.log".to_string()]), None);
         assert!(!status.window_ready);
         assert_eq!(status.alive, Some(false));
     }

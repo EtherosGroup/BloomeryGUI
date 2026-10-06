@@ -67,7 +67,9 @@ export const useLaunchService = defineStore(
             folder.value = scope
             plan.value = null
             pid.value = null
+            windowReadyOnce = false
             logPath.value = ''
+            windowReadyOnce = false
             windowEvidence.value = ''
             events.value = []
             failure.value = null
@@ -99,6 +101,8 @@ export const useLaunchService = defineStore(
         const gameDirectory = ref('')
         /** 轮询次数，用于诊断心跳 */
         let pollTicks = 0
+        /** 本次启动是否已经把游戏窗口带到前台（只做一次） */
+        let windowReadyOnce = false
 
         let pollTimer: number | undefined
 
@@ -126,6 +130,7 @@ export const useLaunchService = defineStore(
                                 ? `${gameDirectory.value}/logs/latest.log`
                                 : '',
                         ].filter((entry) => entry.length > 0),
+                        !windowReadyOnce,
                     )
                     if (status.evidence !== windowEvidence.value) {
                         trace(
@@ -146,6 +151,7 @@ export const useLaunchService = defineStore(
                     if (status.windowReady) {
                         setStep('window', 'done')
                         stopPolling()
+                        windowReadyOnce = true
                         trace('窗口就绪', status.evidence)
                         return
                     }
