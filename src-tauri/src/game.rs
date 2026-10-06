@@ -32,11 +32,14 @@ fn process_alive(pid: u32) -> Option<bool> {
 /// 其它平台：问一下系统命令，取不到就当未知
 #[cfg(not(target_os = "linux"))]
 fn process_alive(pid: u32) -> Option<bool> {
+    // 走统一构造：Windows 下不弹控制台（此处每 1.5 秒被轮询一次）
     #[cfg(windows)]
-    let output = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-        .ok()?;
+    let output = crate::program::build_command(
+        "tasklist",
+        &["/FI".to_string(), format!("PID eq {pid}"), "/NH".to_string()],
+    )
+    .output()
+    .ok()?;
     #[cfg(not(windows))]
     let output = std::process::Command::new("kill").args(["-0", &pid.to_string()]).output().ok()?;
     Some(output.status.success())
