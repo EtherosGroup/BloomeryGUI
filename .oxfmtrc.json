@@ -5,5 +5,10 @@
     "printWidth": 100,
     "semi": false,
     "singleQuote": true,
-    "ignorePatterns": ["pnpm-lock.yaml", "pnpm-workspace.yaml", "src-tauri/**/*.rs"]
+    "ignorePatterns": [
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "src-tauri/**/*.rs",
+        "scripts/fixtures/**"
+    ]
 }

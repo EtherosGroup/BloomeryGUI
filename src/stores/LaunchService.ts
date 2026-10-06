@@ -18,6 +18,8 @@ export interface LaunchFailure {
     code: string
     message: string
     detail: string | null
+    /** 来自错误信封，可重试才有意义 */
+    retryable: boolean
 }
 
 /** 启动流程：确认信息、步骤进度、取消与日志位置 */
@@ -77,8 +79,13 @@ export const useLaunchService = defineStore(
 
         function toFailure(error: unknown): LaunchFailure {
             return error instanceof BloomeryError
-                ? { code: error.code, message: error.message, detail: error.detail }
-                : { code: 'Unknown', message: String(error), detail: null }
+                ? {
+                      code: error.code,
+                      message: error.message,
+                      detail: error.detail,
+                      retryable: error.retryable,
+                  }
+                : { code: 'Unknown', message: String(error), detail: null, retryable: false }
         }
 
         let pollTimer: number | undefined

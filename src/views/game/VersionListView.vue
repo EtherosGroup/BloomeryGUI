@@ -96,7 +96,7 @@ async function setCurrent(folder: CliFolder): Promise<void> {
     await versionService.setCurrentFolder(folder.id)
     const failure = versionService.foldersFailure
     if (failure !== null) {
-        notifyError(errorSummary(failure.code, failure.message))
+        notifyError(errorSummary(failure.code, failure.message, failure.retryable))
         return
     }
     notifySuccess(`当前文件夹 · ${folder.name}`)
@@ -137,7 +137,7 @@ function reportLaunchFailure(): void {
         return
     }
     const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-    notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+    notifyError(`${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`)
 }
 
 async function confirmLaunch(): Promise<void> {
@@ -261,6 +261,7 @@ onMounted(async () => {
                     errorSummary(
                         versionService.foldersFailure.code,
                         versionService.foldersFailure.message,
+                        versionService.foldersFailure.retryable,
                     )
                 }}
             </span>
@@ -311,6 +312,7 @@ onMounted(async () => {
                     errorSummary(
                         versionService.failureOf(folder.id)!.code,
                         versionService.failureOf(folder.id)!.message,
+                        versionService.failureOf(folder.id)!.retryable,
                     )
                 }}
                 <template v-if="versionService.failureOf(folder.id)!.detail">

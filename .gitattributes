@@ -1,0 +1,2 @@
+# 真字节夹具：保持为文本以便 diff，同时锁死 LF（Windows 检出上的 core.autocrlf 会改字节）
+scripts/fixtures/** text eol=lf

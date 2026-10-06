@@ -13,7 +13,14 @@ const COPY_TITLE = '点击复制'
 let observer: MutationObserver | undefined
 
 function markCopyTitle(node: Node): void {
-    if (node instanceof HTMLElement && node.classList.contains('Toastify__toast')) {
+    if (!(node instanceof HTMLElement) || !node.classList.contains('Toastify__toast')) {
+        return
+    }
+    // 只有点击会复制的级别才给悬浮提示
+    const copyable =
+        node.classList.contains('Toastify__toast--error') ||
+        node.classList.contains('Toastify__toast--warning')
+    if (copyable) {
         node.title = COPY_TITLE
     }
 }
@@ -47,10 +54,6 @@ async function copy(text: string): Promise<void> {
         closeButton: false,
         closeOnClick: false,
         position: 'bottom-center',
-        // 点回执也复制（复制的是原消息），保持"点击即复制"一致
-        onClick: () => {
-            void copyText(text)
-        },
     })
 }
 
@@ -59,12 +62,17 @@ function notify(type: NotifyType, message: string, options: ToastOptions = {}): 
     ensureCopyTitle()
     // 没有关闭按钮，error 与 warning 给更长的停留时间
     const duration = type === 'error' || type === 'warning' ? 6000 : 3000
-    toast(message, {
+    const id = toast(message, {
         type,
         autoClose: duration,
         closeButton: false,
         closeOnClick: false,
         onClick: () => {
+            // 成功类点击只关闭；错误类复制后留在屏上供反复复制
+            if (type === 'success' || type === 'info') {
+                toast.remove(id)
+                return
+            }
             void copy(message)
         },
         ...options,

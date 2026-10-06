@@ -3,9 +3,22 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { PhArrowRight, PhCheck, PhWarning } from '@phosphor-icons/vue'
 import GroupButton from '@/components/GroupButton.vue'
 import { errorSummary } from '@/api/errorMessages'
+import { accountTypeLabel } from '@/utils/accountAvatar'
 import { useLaunchService } from '@/stores/LaunchService'
+import { useAccountService } from '@/stores/AccountService'
 
 const launch = useLaunchService()
+const accountService = useAccountService()
+
+/** 本次启动使用的账户：优先取启动计划里的，其次当前选中账户 */
+const accountText = computed(() => {
+    const plan = launch.plan?.account
+    if (plan !== undefined) {
+        return `${plan.name}（${accountTypeLabel(plan.kind)}）`
+    }
+    const selected = accountService.selected
+    return selected === null ? '未登录' : `${selected.name}（${accountTypeLabel(selected.type)}）`
+})
 
 const visible = computed(() => launch.active && launch.steps.length > 0)
 
@@ -28,7 +41,7 @@ const failureText = computed(() => {
         return ''
     }
     const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-    return `${errorSummary(failure.code, failure.message)}${detail}`
+    return `${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`
 })
 
 function close(): void {
@@ -64,6 +77,11 @@ onBeforeUnmount(() => {
         <div v-if="visible" class="launching">
             <section class="launching__panel">
                 <h2 class="launching__title">正在启动游戏 {{ launch.instance }}</h2>
+
+                <p class="launching__account">
+                    <span class="launching__account-key">账户</span>
+                    <span class="launching__account-value">{{ accountText }}</span>
+                </p>
 
                 <ul class="launching__steps">
                     <li
@@ -164,6 +182,31 @@ onBeforeUnmount(() => {
 
     font-size: var(--font-size-lg);
     word-break: break-all;
+}
+
+.launching__account {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    margin: 0;
+
+    font-size: var(--font-size-sm);
+}
+
+.launching__account-key {
+    flex: 0 0 3rem;
+
+    color: var(--text-color-dark);
+}
+
+.launching__account-value {
+    overflow: hidden;
+
+    min-width: 0;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .launching__steps {

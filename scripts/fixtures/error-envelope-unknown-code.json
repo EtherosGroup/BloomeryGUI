@@ -1,0 +1,11 @@
+{
+    "v": 1,
+    "error": {
+        "code": "SomethingNew",
+        "message": "新的错误",
+        "detail": null,
+        "exit": 1,
+        "retryable": true,
+        "context": {}
+    }
+}

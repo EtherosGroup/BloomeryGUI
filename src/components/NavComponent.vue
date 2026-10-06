@@ -46,10 +46,7 @@ const groups: NavGroup[] = [
         id: 'account',
         label: '账户',
         icon: PhUser,
-        items: [
-            { label: '账户管理', to: '/account' },
-            { label: '账户设置', to: '/account/setting' },
-        ],
+        items: [{ label: '账户管理', to: '/account' }],
     },
     {
         id: 'general',
@@ -85,7 +82,7 @@ async function selectAccount(account: CliAccount): Promise<void> {
     const failure = accountService.failure
     if (failure !== null) {
         const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-        notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+        notifyError(`${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`)
     }
 }
 
@@ -191,17 +188,6 @@ function resolveTo(item: NavItem): RouteLocationRaw {
             </ul>
         </div>
 
-        <RouterLink
-            v-if="updateNotice.length > 0"
-            class="nav__update"
-            to="/setup"
-            :title="updateNotice"
-            :aria-label="updateNotice"
-        >
-            <PhArrowCircleUp :size="18" weight="regular" aria-hidden="true" />
-            <span class="nav__update-text">{{ updateNotice }}</span>
-        </RouterLink>
-
         <div class="nav__user">
             <AccountMenu
                 :accounts="accountService.accounts"
@@ -221,6 +207,17 @@ function resolveTo(item: NavItem): RouteLocationRaw {
                 </span>
             </div>
         </div>
+
+        <RouterLink
+            v-if="updateNotice.length > 0"
+            class="nav__update"
+            to="/setup"
+            :title="updateNotice"
+            :aria-label="updateNotice"
+        >
+            <PhArrowCircleUp :size="18" weight="regular" aria-hidden="true" />
+            <span class="nav__update-text">{{ updateNotice }}</span>
+        </RouterLink>
     </nav>
 </template>
 
@@ -241,7 +238,8 @@ function resolveTo(item: NavItem): RouteLocationRaw {
 
     width: var(--nav-width-expanded);
     height: 100%;
-    padding: 0.25rem;
+    /* 底部留出余量：账户区与提示不贴窗口下沿 */
+    padding: 0.25rem 0.25rem 1.5rem;
 
     overflow: hidden;
     contain: layout;

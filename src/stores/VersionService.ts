@@ -8,12 +8,19 @@ export interface VersionFailure {
     code: string
     message: string
     detail: string | null
+    /** 来自错误信封，可重试才有意义 */
+    retryable: boolean
 }
 
 function toFailure(error: unknown): VersionFailure {
     return error instanceof BloomeryError
-        ? { code: error.code, message: error.message, detail: error.detail }
-        : { code: 'Unknown', message: String(error), detail: null }
+        ? {
+              code: error.code,
+              message: error.message,
+              detail: error.detail,
+              retryable: error.retryable,
+          }
+        : { code: 'Unknown', message: String(error), detail: null, retryable: false }
 }
 
 /** 多文件夹的实例列表：按文件夹分别加载，当前文件夹保持原有语义 */
@@ -104,6 +111,7 @@ export const useVersionService = defineStore('VersionService', () => {
                         code: 'InvalidShape',
                         message: '返回内容不是实例列表',
                         detail: null,
+                        retryable: false,
                     },
                 }
             }

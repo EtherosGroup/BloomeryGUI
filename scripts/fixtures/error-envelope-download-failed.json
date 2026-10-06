@@ -1,0 +1,11 @@
+{
+    "v": 1,
+    "error": {
+        "code": "DownloadFailed",
+        "message": "下载失败",
+        "detail": "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+        "exit": 1,
+        "retryable": true,
+        "context": {}
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "v": 1,
+    "error": {
+        "code": "UsageError",
+        "message": "参数不合法",
+        "detail": "action 只能是 list / info / select / rename",
+        "exit": 2,
+        "retryable": false,
+        "context": {}
+    }
+}

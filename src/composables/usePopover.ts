@@ -56,12 +56,16 @@ export function usePopover(options: PopoverOptions): Popover {
         const rect = trigger.getBoundingClientRect()
 
         if (options.placement === 'beside') {
+            // 下方空间不足时改为贴着触发元素底边向上展开，长列表才拿得到高度
+            const below = window.innerHeight - rect.top - margin
+            const above = rect.bottom - margin
+            const flip = below < 240 && above > below
             anchor.value = {
-                top: rect.top,
-                bottom: null,
+                top: flip ? null : rect.top,
+                bottom: flip ? window.innerHeight - rect.bottom : null,
                 left: rect.right + gap,
                 right: null,
-                maxHeight: Math.max(96, window.innerHeight - rect.top - margin),
+                maxHeight: Math.max(96, flip ? above : below),
             }
             return
         }

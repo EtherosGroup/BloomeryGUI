@@ -2,10 +2,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { PhDotsThree } from '@phosphor-icons/vue'
 import GroupButton from '@/components/GroupButton.vue'
+import GroupInput from '@/components/GroupInput.vue'
+import GroupRadio from '@/components/GroupRadio.vue'
 import PopupMenu from '@/components/PopupMenu.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import type { CliAccount } from '@/api/account'
 import { errorSummary } from '@/api/errorMessages'
+import { openPath } from '@/api/system'
+import { notifySuccess, notifyError } from '@/utils/notify'
 import { useAccountService } from '@/stores/AccountService'
 import { accountTypeLabel, avatarInitial, avatarUrl } from '@/utils/accountAvatar'
 import type { PopupMenuItem } from '@/components/PopupMenu.vue'
@@ -27,7 +31,64 @@ const confirmOpen = computed({
 })
 
 import type { PopupWindowButton } from '@/types/PopupWindowButton'
-import { notifySuccess, notifyError } from '@/utils/notify'
+
+/** 添加账户弹窗 */
+const addOpen = ref(false)
+const addType = ref('offline')
+const addName = ref('')
+
+const addBusy = ref(false)
+
+const addButtons: PopupWindowButton[] = [
+    { label: '取消', onClick: cancelAdd },
+    // 不 await：等待设备码授权期间取消仍可用
+    {
+        label: '添加',
+        closeOnClick: false,
+        onClick: () => {
+            void addAccount()
+        },
+    },
+]
+
+async function addAccount(): Promise<void> {
+    if (addType.value === 'microsoft') {
+        addBusy.value = true
+        const done = await accountService.loginMicrosoft()
+        addBusy.value = false
+        if (!done) {
+            report()
+            return
+        }
+        notifySuccess('账户已添加')
+        addOpen.value = false
+        return
+    }
+
+    const done = await accountService.loginOffline(addName.value)
+    if (!done) {
+        report()
+        return
+    }
+    notifySuccess(`账户已添加 · ${addName.value.trim()}`)
+    addName.value = ''
+    addOpen.value = false
+}
+
+/** 取消：结束等待中的设备码授权 */
+async function cancelAdd(): Promise<void> {
+    await accountService.cancelLogin()
+    addOpen.value = false
+}
+
+/** 设备码里的验证链接交给系统浏览器 */
+async function openVerify(): Promise<void> {
+    const prompt = accountService.device
+    if (prompt === null) {
+        return
+    }
+    await openPath(prompt.verificationUriComplete ?? prompt.verificationUri).catch(() => undefined)
+}
 
 /** 每行的操作项，锚定在 ... 按钮旁 */
 function actionsFor(account: CliAccount): PopupMenuItem[] {
@@ -67,7 +128,7 @@ function report(): void {
         return
     }
     const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-    notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+    notifyError(`${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`)
 }
 
 async function confirmRemove(): Promise<void> {
@@ -95,18 +156,27 @@ onMounted(accountService.load)
     <main class="accounts">
         <header class="accounts__head">
             <h1 class="accounts__title">账户管理</h1>
-            <GroupButton
-                variant="ghost"
-                :disabled="accountService.loading"
-                @click="accountService.load"
-            >
-                {{ accountService.loading ? '读取中' : '刷新' }}
-            </GroupButton>
+            <span class="accounts__actions">
+                <GroupButton @click="addOpen = true">添加账户</GroupButton>
+                <GroupButton
+                    variant="ghost"
+                    :disabled="accountService.loading"
+                    @click="accountService.load"
+                >
+                    {{ accountService.loading ? '读取中' : '刷新' }}
+                </GroupButton>
+            </span>
         </header>
 
         <p v-if="accountService.failure" class="accounts__failure">
             <span class="accounts__failure-code">
-                {{ errorSummary(accountService.failure.code, accountService.failure.message) }}
+                {{
+                    errorSummary(
+                        accountService.failure.code,
+                        accountService.failure.message,
+                        accountService.failure.retryable,
+                    )
+                }}
             </span>
             <span v-if="accountService.failure.detail" class="accounts__failure-detail">
                 {{ accountService.failure.detail }}
@@ -158,6 +228,41 @@ onMounted(accountService.load)
             </li>
         </ul>
 
+        <PopupWindow v-model:open="addOpen" title="添加账户" :buttons="addButtons">
+            <GroupRadio
+                v-model="addType"
+                label="类型"
+                :options="[
+                    { label: '离线登录', value: 'offline' },
+                    { label: 'Microsoft', value: 'microsoft' },
+                ]"
+            />
+            <GroupInput v-if="addType === 'offline'" v-model="addName" label="游戏名" />
+
+            <template v-else>
+                <template v-if="accountService.device">
+                    <div class="accounts__device">
+                        <span class="accounts__device-key">验证码</span>
+                        <span class="accounts__device-code">{{
+                            accountService.device.userCode
+                        }}</span>
+                    </div>
+                    <div class="accounts__device">
+                        <span class="accounts__device-key">链接</span>
+                        <span class="accounts__device-url">{{
+                            accountService.device.verificationUri
+                        }}</span>
+                        <GroupButton variant="ghost" @click="openVerify">打开</GroupButton>
+                    </div>
+                    <p class="accounts__note">
+                        过期时间 {{ accountService.device.expiresAt }} · 等待浏览器授权
+                    </p>
+                </template>
+                <p v-else-if="addBusy" class="accounts__note">等待设备码</p>
+                <p v-else class="accounts__note">微软登录为设备码流程</p>
+            </template>
+        </PopupWindow>
+
         <PopupWindow
             v-model:open="confirmOpen"
             title="移除账户"
@@ -186,6 +291,41 @@ onMounted(accountService.load)
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+}
+
+.accounts__device {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    font-size: var(--font-size-sm);
+}
+
+.accounts__device-key {
+    flex: 0 0 4rem;
+
+    color: var(--text-color-dark);
+}
+
+.accounts__device-code,
+.accounts__device-url {
+    flex: 1;
+    min-width: 0;
+
+    font-family: ui-monospace, monospace;
+
+    word-break: break-all;
+}
+
+.accounts__device-code {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+}
+
+.accounts__actions {
+    display: flex;
+    gap: 0.5rem;
 }
 
 .accounts__title {

@@ -32,6 +32,8 @@ export interface CliRunRequest {
     args: string[]
     /** stderr 逐行回调；进度 ndjson 与人类提示混在同一路 */
     onStderrLine?: (line: string) => void
+    /** stdout 逐行回调；设备码一类的 NDJSON 事件走这一路 */
+    onStdoutLine?: (line: string) => void
 }
 
 /** 传输层：Tauri 侧与 Node 侧各实现一份 */
@@ -42,6 +44,10 @@ export interface CliTransport {
 export interface CliRunOptions {
     /** 调用方指定，用于 killCli 取消 */
     id?: string
+    /** stdout 逐行回调 */
+    onStdoutLine?: (line: string) => void
+    /** 输出为多行 NDJSON 时跳过整体 JSON 解析，直接返回原始 stdout */
+    raw?: boolean
     onProgress?: (event: CliProgressEvent) => void
     /** 探活一类不需要进度的调用传 false */
     progress?: boolean
@@ -123,9 +129,35 @@ export function meetsApi(info: CliVersionInfo, required: number): boolean {
     return typeof info.api === 'number' && info.api >= required
 }
 
+/** stdout 取 JSON：契约上 CLI 只给 JSON，这里容忍混入的人类提示行 */
+function parseStdout<T>(text: string): T | null {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) {
+        return null
+    }
+    const candidates = [trimmed]
+    const start = trimmed.search(/[[{]/)
+    if (start > 0) {
+        const sliced = trimmed.slice(start)
+        candidates.push(sliced)
+        const last = Math.max(sliced.lastIndexOf('}'), sliced.lastIndexOf(']'))
+        if (last > 0) {
+            candidates.push(sliced.slice(0, last + 1))
+        }
+    }
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate) as T
+        } catch {
+            // 换下一个候选
+        }
+    }
+    return null
+}
+
 function readErrorPayload(stdout: string): CliErrorPayload | null {
     try {
-        const value = JSON.parse(stdout) as Partial<CliErrorEnvelope>
+        const value = parseStdout<Partial<CliErrorEnvelope>>(stdout)
         return value?.error && typeof value.error.code === 'string' ? value.error : null
     } catch {
         return null
@@ -168,6 +200,7 @@ export class BloomeryClient {
             result = await this.transport.run({
                 id: options.id,
                 args,
+                onStdoutLine: options.onStdoutLine,
                 onStderrLine: onProgress
                     ? (line) => {
                           const event = parseProgressLine(line)
@@ -182,6 +215,17 @@ export class BloomeryClient {
                 exit: -1,
                 detail: String(cause),
             })
+        }
+
+        // 原始模式：输出是多行 NDJSON 事件流，整体解析交给调用方
+        if (options.raw === true) {
+            if (result.code !== CLI_EXIT.ok) {
+                throw new BloomeryError(LOCAL_ERROR_CODE.envelopeMissing, `退出码 ${result.code}`, {
+                    exit: result.code,
+                    detail: firstLine(result.stderr) || firstLine(result.stdout),
+                })
+            }
+            return result.stdout as unknown as T
         }
 
         const payload = readErrorPayload(result.stdout)
@@ -201,11 +245,14 @@ export class BloomeryClient {
             )
         }
 
-        try {
-            return JSON.parse(result.stdout) as T
-        } catch {
+        const parsed = parseStdout<T>(result.stdout)
+        if (parsed !== null) {
+            return parsed
+        }
+        {
             throw new BloomeryError(LOCAL_ERROR_CODE.invalidJson, 'stdout 不是合法 JSON', {
                 exit: result.code,
+                // 首个非空行往往是混进来的提示，直接带出来定位
                 detail: firstLine(result.stdout),
             })
         }

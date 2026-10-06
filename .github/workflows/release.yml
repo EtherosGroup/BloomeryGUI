@@ -1,0 +1,326 @@
+# 推 v* 标签发版，附带 Windows 与 Linux 的安装包
+#
+# job 分层：package -> smoke -> release
+# 版本号两份：package.json、src-tauri/tauri.conf.json
+# 附件四个：msi、nsis setup、便携 zip、deb
+# 密钥：仅仓库自带 GITHUB_TOKEN
+# 打包目标由命令行 --bundles 指定，tauri.conf.json 的 targets 不动
+# workflow_dispatch 走演练路径：同样打包冒烟，只上传 workflow artifact
+
+name: release
+
+on:
+    push:
+        tags: ['v*']
+    # 演练：只产出产物，不创建 Release
+    workflow_dispatch:
+
+permissions:
+    contents: read # 默认只读，创建 Release 的 job 单独提权
+
+# 同一个标签不并发运行两次，重复推送时后一次排队
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    # 构建 + 产物清单核对
+    package:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: windows-2022
+                      platform: windows-x64
+                      bundles: 'msi,nsis'
+                    - os: ubuntu-22.04
+                      platform: linux-x64
+                      bundles: 'deb'
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 60
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  # 与 pnpm-lock.yaml 的 lockfileVersion 9.0 同代
+                  version: 12
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+
+            # 版本一致性门禁：两份版本号互等，推标签时还等于标签
+            # 回归自检：错误信封真字节 + bundle.icon 与磁盘一致性
+            - name: 错误信封自检
+              run: pnpm run check:errors && pnpm run check:icons
+
+            - name: 版本一致性门禁
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  pkg="$(node -p "require('./package.json').version")"
+                  conf="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+                  echo "package.json 版本：$pkg"
+                  echo "tauri.conf.json 版本：$conf"
+                  if [ "$pkg" != "$conf" ]; then
+                    echo "错误：两处版本号不一致：package.json $pkg / tauri.conf.json $conf"
+                    echo "版本号修改入口：npm version"
+                    exit 1
+                  fi
+                  # 三处版本号一并门禁：产物版本以 tauri.conf.json 为准，Cargo.toml 为 crate 元数据
+                  cargo="$(sed -n 's/^version *= *"\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+                  if [ "$cargo" != "$conf" ]; then
+                    echo "错误：三处版本号不一致：Cargo.toml $cargo / tauri.conf.json $conf"
+                    echo "版本号修改入口：npm version，再手改 tauri.conf.json 与 Cargo.toml"
+                    exit 1
+                  fi
+                  if [ "${{ github.event_name }}" = "push" ]; then
+                    tag="${{ github.ref_name }}"
+                    if [ "$tag" != "v$pkg" ]; then
+                      echo "错误：标签与版本号不一致：标签 $tag / 版本 v$pkg"
+                      echo "版本号修改入口：npm version"
+                      exit 1
+                    fi
+                    echo "标签与版本号一致：$tag"
+                  fi
+
+            # Linux 系统依赖，取 Tauri 官方 CI 列表
+            - name: 装 Linux 系统依赖
+              if: runner.os == 'Linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+            # Rust 工具链
+            - uses: dtolnay/rust-toolchain@stable
+
+            # Rust 构建缓存
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: './src-tauri -> target'
+
+            # 前端依赖
+            - name: 装前端依赖
+              run: pnpm install --frozen-lockfile
+
+            # 打包，beforeBuildCommand 里跑 pnpm build
+            - name: 打包
+              run: pnpm tauri build --bundles ${{ matrix.bundles }}
+
+            # 便携包：Tauri 无 portable target，直接压 release 目录里的可执行文件
+            - name: 打包便携版
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  $version = node -p "require('./src-tauri/tauri.conf.json').version"
+                  New-Item -ItemType Directory -Force -Path release | Out-Null
+                  Compress-Archive -Path "src-tauri/target/release/bloomery-gui.exe" -DestinationPath "release/bloomery-gui-$version-windows-x64-portable.zip"
+
+            # 附件命名：项目名-版本-平台.后缀
+            - name: 归置产物
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+                  # 首次跑若实际文件名与预期不同，看这段输出
+                  ls -R src-tauri/target/release/bundle || true
+                  mkdir -p release
+                  case "${{ matrix.platform }}" in
+                    windows-x64)
+                      cp "src-tauri/target/release/bundle/msi/bloomery-gui_${version}_x64_en-US.msi" "release/bloomery-gui-${version}-windows-x64.msi"
+                      cp "src-tauri/target/release/bundle/nsis/bloomery-gui_${version}_x64-setup.exe" "release/bloomery-gui-${version}-windows-x64-setup.exe"
+                      ;;
+                    linux-x64)
+                      cp "src-tauri/target/release/bundle/deb/bloomery-gui_${version}_amd64.deb" "release/bloomery-gui-${version}-linux-x64.deb"
+                      ;;
+                  esac
+                  ls -l release/
+
+            # 产物清单核对：少一个即整个失败
+            - name: 核对产物清单
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+                  case "${{ matrix.platform }}" in
+                    windows-x64)
+                      expected=(
+                        "release/bloomery-gui-${version}-windows-x64.msi"
+                        "release/bloomery-gui-${version}-windows-x64-setup.exe"
+                        "release/bloomery-gui-${version}-windows-x64-portable.zip"
+                      )
+                      ;;
+                    linux-x64)
+                      expected=(
+                        "release/bloomery-gui-${version}-linux-x64.deb"
+                      )
+                      ;;
+                  esac
+                  for f in "${expected[@]}"; do
+                    test -s "$f" || { echo "错误：产物缺失：$f"; exit 1; }
+                    size="$(wc -c < "$f")"
+                    # 1 MiB 下限：截断或空壳构建
+                    test "$size" -gt 1048576 || { echo "错误：产物过小：$f $size 字节"; exit 1; }
+                    echo "$size 字节 $f"
+                  done
+
+            # 推标签时由 release job 取出来发版，手动触发时留作演练产物
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: release-${{ matrix.platform }}-${{ github.sha }}
+                  path: release/
+                  if-no-files-found: error
+
+    # 空环境冒烟：装包后真跑一遍产物
+    smoke:
+        needs: package
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-22.04
+                      platform: linux-x64
+                    - os: windows-2022
+                      platform: windows-x64
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 20
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  name: release-${{ matrix.platform }}-${{ github.sha }}
+                  path: assets
+
+            # deb 装进空系统，apt 一并拉齐 deb 声明的运行期依赖
+            - name: 装 deb
+              if: runner.os == 'Linux'
+              run: |
+                  set -euo pipefail
+                  deb="$(ls assets/*.deb)"
+                  version="$(basename "$deb" | sed -E 's/^bloomery-gui-(.+)-linux-x64\.deb$/\1/')"
+                  echo "附件：$deb 版本 $version"
+                  dpkg-deb -f "$deb" Package Version
+                  test "$(dpkg-deb -f "$deb" Version)" = "$version" || { echo "错误：deb 内版本与附件名不一致：$version"; exit 1; }
+                  sudo apt-get update
+                  sudo apt-get install -y "./$deb" xvfb
+                  pkg="$(dpkg-deb -f "$deb" Package)"
+                  installed="$(dpkg-query -W -f='${Version}' "$pkg")"
+                  test "$installed" = "$version" || { echo "错误：已装版本 $installed，附件版本 $version"; exit 1; }
+                  bin="$(dpkg -L "$pkg" | grep -E '^/usr/bin/' | head -1)"
+                  test -n "$bin" || { echo "错误：deb 内无 /usr/bin 可执行文件"; exit 1; }
+                  echo "BIN=$bin" >> "$GITHUB_ENV"
+
+            # 启动存活检查：20 秒内未退出即窗口起来了
+            # 存活检查依赖无头软件渲染，偶发失败不阻塞发布
+            - name: 跑一遍 deb（不阻塞）
+              continue-on-error: true
+              if: runner.os == 'Linux'
+              run: |
+                  set -euo pipefail
+                  export WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1
+                  set +e
+                  timeout 20 xvfb-run -a "$BIN" > /tmp/app.log 2>&1
+                  code=$?
+                  set -e
+                  cat /tmp/app.log
+                  test "$code" = "124" || { echo "错误：启动退出码 $code"; exit 1; }
+                  echo "启动存活：deb 可运行"
+
+            # 安装包文件头核对：msi 为 OLE 复合文档，setup.exe 为 PE
+            - name: 核对安装包
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  function Get-Head([string]$Path, [int]$Count) {
+                      $stream = [System.IO.File]::OpenRead($Path)
+                      $bytes = [byte[]]::new($Count)
+                      $null = $stream.Read($bytes, 0, $Count)
+                      $stream.Close()
+                      return $bytes
+                  }
+                  $msi = Get-ChildItem 'assets/*.msi' | Select-Object -First 1
+                  if (-not $msi) { throw "错误：产物缺失：msi" }
+                  $head = Get-Head $msi.FullName 4
+                  if ($head[0] -ne 0xD0 -or $head[1] -ne 0xCF -or $head[2] -ne 0x11 -or $head[3] -ne 0xE0) { throw "错误：msi 文件头异常：$($msi.Name)" }
+                  $setup = Get-ChildItem 'assets/*-setup.exe' | Select-Object -First 1
+                  if (-not $setup) { throw "错误：产物缺失：nsis setup" }
+                  $head = Get-Head $setup.FullName 2
+                  if ($head[0] -ne 0x4D -or $head[1] -ne 0x5A) { throw "错误：setup.exe 文件头异常：$($setup.Name)" }
+                  Write-Host "安装包文件头正常：$($msi.Name) / $($setup.Name)"
+
+            # 便携包解压 + 启动存活检查
+            - name: 跑一遍便携版
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  $zip = Get-ChildItem 'assets/*portable.zip' | Select-Object -First 1
+                  if (-not $zip) { throw "错误：产物缺失：便携 zip" }
+                  $version = $zip.Name -replace '^bloomery-gui-', '' -replace '-windows-x64-portable\.zip$', ''
+                  Write-Host "附件：$($zip.Name) 版本 $version"
+                  Expand-Archive -Path $zip.FullName -DestinationPath portable -Force
+                  $exe = Get-ChildItem portable -Recurse -Filter *.exe | Select-Object -First 1
+                  if (-not $exe) { throw "错误：便携包内无 exe" }
+                  # 内嵌版本来自 tauri.conf.json
+                  $product = $exe.VersionInfo.ProductVersion
+                  Write-Host "exe 内嵌版本：$product"
+                  if ($product -and ($product -notlike "$version*")) { throw "错误：exe 内嵌版本 $product，附件版本 $version" }
+                  # 存活检查不阻塞：无头 runner 缺 WebView2 与桌面会话时可能偶发失败
+                  $proc = Start-Process -FilePath $exe.FullName -PassThru
+                  Start-Sleep -Seconds 10
+                  if ($proc.HasExited) {
+                    Write-Warning "存活检查未通过：启动即退出，退出码 $($proc.ExitCode)"
+                  } else {
+                    Stop-Process -Id $proc.Id -Force
+                    Write-Host "启动存活：便携版可运行"
+                  }
+
+    # 建 Release
+    release:
+        needs: [package, smoke]
+        if: github.event_name == 'push'
+        runs-on: ubuntu-22.04
+        timeout-minutes: 10
+        permissions:
+            contents: write # 创建 Release、上传附件
+        steps:
+            # gh 需要仓库上下文，产物全从 artifact 取
+            - uses: actions/checkout@v4
+
+            - name: 取全部附件
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: release-*
+                  path: assets
+                  merge-multiple: true
+
+            - name: 建 Release 并附上附件
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  TAG: ${{ github.ref_name }}
+              run: |
+                  set -euo pipefail
+                  version="${TAG#v}"
+                  expected=(
+                    "bloomery-gui-${version}-windows-x64.msi"
+                    "bloomery-gui-${version}-windows-x64-setup.exe"
+                    "bloomery-gui-${version}-windows-x64-portable.zip"
+                    "bloomery-gui-${version}-linux-x64.deb"
+                  )
+                  files=()
+                  # 附件逐个核对：缺一个即不发版
+                  for name in "${expected[@]}"; do
+                    test -s "assets/$name" || { echo "错误：附件缺失：$name"; exit 1; }
+                    files+=("assets/$name")
+                  done
+                  ls -l "${files[@]}"
+                  repo="$GITHUB_REPOSITORY"
+                  if gh release view "$TAG" -R "$repo" >/dev/null 2>&1; then
+                    gh release upload "$TAG" "${files[@]}" -R "$repo" --clobber
+                  else
+                    gh release create "$TAG" -R "$repo" \
+                      --title "$TAG" \
+                      --generate-notes \
+                      "${files[@]}"
+                  fi
+                  gh release view "$TAG" -R "$repo" --json url --jq .url

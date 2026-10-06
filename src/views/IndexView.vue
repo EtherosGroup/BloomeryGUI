@@ -9,10 +9,12 @@ import GroupSelect from '@/components/GroupSelect.vue'
 import GameLaunching from '@/components/GameLaunching.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
+import { useAccountService } from '@/stores/AccountService'
 import { useLaunchService } from '@/stores/LaunchService'
 import { useVersionService } from '@/stores/VersionService'
 import type { CliLaunchResult } from '@/api/types'
 import type { ChoiceOptionType } from '@/types/ChoiceOptionType'
+import { accountTypeLabel } from '@/utils/accountAvatar'
 import { notifySuccess, notifyError } from '@/utils/notify'
 
 type TimeSection = 'morning' | 'noon' | 'afternoon' | 'night' | 'midnight' | 'dawn'
@@ -86,16 +88,27 @@ async function switchInstance(id: string): Promise<void> {
     const failure = versionService.failure
     if (failure !== null) {
         const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-        notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+        notifyError(`${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`)
     }
 }
 
 const launchService = useLaunchService()
+const accountService = useAccountService()
 const confirmOpen = ref(false)
 const skipNext = ref(false)
 const planInfo = ref<CliLaunchResult | null>(null)
 
 /** 确认弹窗里的启动信息 */
+/** 本次启动使用的账户：优先取启动计划里的，其次当前选中账户 */
+const accountText = computed(() => {
+    const plan = planInfo.value?.account
+    if (plan !== undefined) {
+        return `${plan.name}（${accountTypeLabel(plan.kind)}）`
+    }
+    const selected = accountService.selected
+    return selected === null ? '未登录' : `${selected.name}（${accountTypeLabel(selected.type)}）`
+})
+
 const confirmRows = computed(() => {
     const plan = planInfo.value
     if (plan === null) {
@@ -104,13 +117,7 @@ const confirmRows = computed(() => {
     const memory = (plan.args ?? []).find((arg) => arg.startsWith('-Xmx')) ?? ''
     return [
         { key: '实例', value: plan.version },
-        {
-            key: '账户',
-            value:
-                plan.account === undefined
-                    ? '未知'
-                    : `${plan.account.name}（${plan.account.kind}）`,
-        },
+        { key: '账户', value: accountText.value },
         {
             key: 'Java',
             value: plan.java === undefined ? '未知' : `${plan.java.major} · ${plan.java.vendor}`,
@@ -131,7 +138,9 @@ async function requestLaunch(): Promise<void> {
         const failure = launchService.failure
         if (failure !== null) {
             const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-            notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+            notifyError(
+                `${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`,
+            )
         }
         return
     }
@@ -162,7 +171,9 @@ async function runLaunch(id: string): Promise<void> {
         const failure = launchService.failure
         if (failure !== null) {
             const detail = failure.detail === null ? '' : ` · ${failure.detail}`
-            notifyError(`${errorSummary(failure.code, failure.message)}${detail}`)
+            notifyError(
+                `${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`,
+            )
         }
         return
     }

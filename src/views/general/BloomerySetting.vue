@@ -37,6 +37,8 @@ interface Failure {
     code: string
     message: string
     detail: string | null
+    /** 来自错误信封，可重试才有意义 */
+    retryable: boolean
 }
 
 function options(entries: [string, string][]): ChoiceOptionType[] {
@@ -215,8 +217,13 @@ function booleanAt(key: string): boolean {
 
 function toFailure(error: unknown): Failure {
     return error instanceof BloomeryError
-        ? { code: error.code, message: error.message, detail: error.detail }
-        : { code: 'Unknown', message: String(error), detail: null }
+        ? {
+              code: error.code,
+              message: error.message,
+              detail: error.detail,
+              retryable: error.retryable,
+          }
+        : { code: 'Unknown', message: String(error), detail: null, retryable: false }
 }
 
 async function read(): Promise<void> {
@@ -245,7 +252,7 @@ function report(error: unknown, quiet: boolean): void {
     failure.value = next
     if (quiet) {
         const detail = next.detail === null ? '' : ` · ${next.detail}`
-        notifyError(`${errorSummary(next.code, next.message)}${detail}`)
+        notifyError(`${errorSummary(next.code, next.message, next.retryable)}${detail}`)
     }
 }
 
@@ -258,6 +265,7 @@ async function write(field: Field, value: string, quiet = false): Promise<void> 
                 code: 'UsageError',
                 message: '取值不合法',
                 detail: field.min === undefined ? '需要整数' : `需要不小于 ${field.min} 的整数`,
+                retryable: false,
             }
             return
         }
@@ -269,7 +277,12 @@ async function write(field: Field, value: string, quiet = false): Promise<void> 
                 throw new Error('需要数组')
             }
         } catch {
-            failure.value = { code: 'UsageError', message: '取值不合法', detail: '需要 JSON 数组' }
+            failure.value = {
+                code: 'UsageError',
+                message: '取值不合法',
+                detail: '需要 JSON 数组',
+                retryable: false,
+            }
             return
         }
     }
@@ -342,7 +355,7 @@ onMounted(load)
 
         <p v-if="failure" class="bloomery-setting__failure">
             <span class="bloomery-setting__failure-code">{{
-                errorSummary(failure.code, failure.message)
+                errorSummary(failure.code, failure.message, failure.retryable)
             }}</span>
             <span v-if="failure.detail" class="bloomery-setting__failure-detail">{{
                 failure.detail

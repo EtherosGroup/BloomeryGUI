@@ -33,6 +33,8 @@ export function createTauriTransport(target: CliTarget): CliTransport {
             const stderrLines: string[] = []
             let unlisten: (() => void) | undefined
 
+            let unlistenStdout: (() => void) | undefined
+
             return (async () => {
                 if (request.onStderrLine) {
                     unlisten = await listen<CliStderrLine>('cli://stderr', (event) => {
@@ -41,6 +43,14 @@ export function createTauriTransport(target: CliTarget): CliTransport {
                         }
                         stderrLines.push(event.payload.line)
                         request.onStderrLine?.(event.payload.line)
+                    })
+                }
+                if (request.onStdoutLine) {
+                    unlistenStdout = await listen<CliStderrLine>('cli://stdout', (event) => {
+                        if (event.payload.id !== id) {
+                            return
+                        }
+                        request.onStdoutLine?.(event.payload.line)
                     })
                 }
 
@@ -60,6 +70,7 @@ export function createTauriTransport(target: CliTarget): CliTransport {
                     }
                 } finally {
                     unlisten?.()
+                    unlistenStdout?.()
                 }
             })()
         },

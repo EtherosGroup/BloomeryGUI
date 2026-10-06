@@ -70,10 +70,22 @@ fn run_blocking(app: AppHandle, request: CliRequest) -> Result<CliOutcome, Strin
     let stdout = child.stdout.take().ok_or("stdout 未捕获")?;
     let stderr = child.stderr.take().ok_or("stderr 未捕获")?;
 
-    // stdout 独立线程读走，管道写满会阻塞子进程
+    // stdout 独立线程读走：逐行转发（设备码一类的 NDJSON 事件），同时累积成完整输出
+    let stdout_emitter = app.clone();
+    let stdout_id = id.clone();
     let stdout_reader = std::thread::spawn(move || {
         let mut buffer = String::new();
-        let _ = BufReader::new(stdout).read_to_string(&mut buffer);
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = stdout_emitter.emit(
+                "cli://stdout",
+                CliStderrLine {
+                    id: stdout_id.clone(),
+                    line: line.clone(),
+                },
+            );
+            buffer.push_str(&line);
+            buffer.push('\n');
+        }
         buffer
     });
 

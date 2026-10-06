@@ -102,57 +102,59 @@ function showImage(account: CliAccount): boolean {
     </div>
 
     <Teleport to="body">
-        <ul
-            v-if="open"
-            :ref="bindList"
-            class="account-menu__list"
-            :style="{
-                top: anchor.top === null ? undefined : `${anchor.top}px`,
-                bottom: anchor.bottom === null ? undefined : `${anchor.bottom}px`,
-                left: anchor.left === null ? undefined : `${anchor.left}px`,
-                right: anchor.right === null ? undefined : `${anchor.right}px`,
-                maxHeight: `${anchor.maxHeight}px`,
-            }"
-        >
-            <li v-if="accounts.length === 0" class="account-menu__empty">
-                <span>无已登入账户</span>
-                <span class="account-menu__empty-dir">
-                    数据目录 {{ home.length > 0 ? home : 'CLI 默认目录' }}
-                </span>
-            </li>
-            <li v-for="account in accounts" :key="account.id">
-                <button
-                    type="button"
-                    class="account-menu__item"
-                    :class="{
-                        'account-menu__item--selected': account.selected,
-                        'account-menu__item--switching': switching === account.id,
-                    }"
-                    :aria-current="account.selected ? 'true' : undefined"
-                    :disabled="switching !== null"
-                    @click="pick(account)"
-                >
-                    <span class="account-menu__row-avatar">
-                        <img
-                            v-if="showImage(account)"
-                            class="account-menu__avatar"
-                            :src="avatarUrl(account) ?? undefined"
-                            alt=""
-                            @error="onAvatarError(account.id)"
-                        />
-                        <span v-else class="account-menu__initial">
-                            {{ avatarInitial(account.name) }}
-                        </span>
+        <Transition name="account-menu">
+            <ul
+                v-if="open"
+                :ref="bindList"
+                class="account-menu__list"
+                :style="{
+                    top: anchor.top === null ? undefined : `${anchor.top}px`,
+                    bottom: anchor.bottom === null ? undefined : `${anchor.bottom}px`,
+                    left: anchor.left === null ? undefined : `${anchor.left}px`,
+                    right: anchor.right === null ? undefined : `${anchor.right}px`,
+                    maxHeight: `${anchor.maxHeight}px`,
+                }"
+            >
+                <li v-if="accounts.length === 0" class="account-menu__empty">
+                    <span>无已登入账户</span>
+                    <span class="account-menu__empty-dir">
+                        数据目录 {{ home.length > 0 ? home : 'CLI 默认目录' }}
                     </span>
-                    <span class="account-menu__text">
-                        <span class="account-menu__name">{{ account.name }}</span>
-                        <span class="account-menu__meta">
-                            {{ accountTypeLabel(account.type) }} · {{ account.status }}
+                </li>
+                <li v-for="account in accounts" :key="account.id">
+                    <button
+                        type="button"
+                        class="account-menu__item"
+                        :class="{
+                            'account-menu__item--selected': account.selected,
+                            'account-menu__item--switching': switching === account.id,
+                        }"
+                        :aria-current="account.selected ? 'true' : undefined"
+                        :disabled="switching !== null"
+                        @click="pick(account)"
+                    >
+                        <span class="account-menu__row-avatar">
+                            <img
+                                v-if="showImage(account)"
+                                class="account-menu__avatar"
+                                :src="avatarUrl(account) ?? undefined"
+                                alt=""
+                                @error="onAvatarError(account.id)"
+                            />
+                            <span v-else class="account-menu__initial">
+                                {{ avatarInitial(account.name) }}
+                            </span>
                         </span>
-                    </span>
-                </button>
-            </li>
-        </ul>
+                        <span class="account-menu__text">
+                            <span class="account-menu__name">{{ account.name }}</span>
+                            <span class="account-menu__meta">
+                                {{ accountTypeLabel(account.type) }} · {{ account.status }}
+                            </span>
+                        </span>
+                    </button>
+                </li>
+            </ul>
+        </Transition>
     </Teleport>
 </template>
 
@@ -211,6 +213,10 @@ function showImage(account: CliAccount): boolean {
     position: fixed;
     z-index: 40;
 
+    transition:
+        opacity var(--transition-duration) var(--transition-ease),
+        transform var(--transition-duration) var(--transition-ease);
+
     display: flex;
     flex-direction: column;
 
@@ -245,6 +251,12 @@ function showImage(account: CliAccount): boolean {
     font-size: var(--font-size-xs);
 
     word-break: break-all;
+}
+
+.account-menu-enter-from,
+.account-menu-leave-to {
+    opacity: 0;
+    transform: translateX(-0.4rem);
 }
 
 .account-menu__item {
@@ -317,5 +329,11 @@ function showImage(account: CliAccount): boolean {
     color: var(--text-color-dark);
     font-size: var(--font-size-xs);
     font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .account-menu__list {
+        transition: none;
+    }
 }
 </style>

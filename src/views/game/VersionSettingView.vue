@@ -22,6 +22,8 @@ interface Failure {
     code: string
     message: string
     detail: string | null
+    /** 来自错误信封，可重试才有意义 */
+    retryable: boolean
 }
 
 const route = useRoute()
@@ -46,8 +48,13 @@ const nameDraft = ref('')
 
 function toFailure(error: unknown): Failure {
     return error instanceof BloomeryError
-        ? { code: error.code, message: error.message, detail: error.detail }
-        : { code: 'Unknown', message: String(error), detail: null }
+        ? {
+              code: error.code,
+              message: error.message,
+              detail: error.detail,
+              retryable: error.retryable,
+          }
+        : { code: 'Unknown', message: String(error), detail: null, retryable: false }
 }
 
 /** 实例级寻址：id 可含点号，走 --folder / --instance */
@@ -193,7 +200,7 @@ watch(instanceId, load)
 
         <p v-if="failure" class="setting__failure">
             <span class="setting__failure-code">{{
-                errorSummary(failure.code, failure.message)
+                errorSummary(failure.code, failure.message, failure.retryable)
             }}</span>
             <span v-if="failure.detail" class="setting__failure-detail">{{ failure.detail }}</span>
         </p>

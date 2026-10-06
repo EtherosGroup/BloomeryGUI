@@ -10,7 +10,10 @@
         "tauri": "tauri",
         "format": "oxfmt .",
         "format:check": "oxfmt --check .",
-        "predev": "node scripts/free-port.mjs 1420"
+        "predev": "node scripts/free-port.mjs 1420",
+        "version": "node scripts/sync-version.mjs",
+        "check:errors": "node --experimental-strip-types scripts/check-error-envelopes.mjs",
+        "check:icons": "node scripts/check-bundle-icons.mjs"
     },
     "dependencies": {
         "@phosphor-icons/vue": "^2.2.1",
