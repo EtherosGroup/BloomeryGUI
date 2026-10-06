@@ -209,8 +209,8 @@ export const useLaunchService = defineStore(
                 if (scope.length > 0) {
                     args.push('--folder', scope)
                 }
-                const result = await trace('launch 命令', args.join(' '))
-                client.run<CliLaunchResult>(args, {
+                trace('launch 命令', args.join(' '))
+                const result = await client.run<CliLaunchResult>(args, {
                     id,
                     onStderrLine: (line) => trace('cli stderr', line),
                     onProgress: (event) => {
