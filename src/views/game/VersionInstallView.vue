@@ -192,11 +192,25 @@ async function loadVersions(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
-    await Promise.all([loadVersions(), install.loadLoaders()])
+    await loadVersions()
+    await loadLoadersOfGame()
 }
 
-/** 换游戏版本后，加载器版本要重新查 */
-function pickGame(id: string): void {
+/** 加载器那栏按选定的游戏版本查，没有版本的不列 */
+async function loadLoadersOfGame(): Promise<void> {
+    if (game.value.length === 0) {
+        return
+    }
+    await install.loadAvailableLoaders(game.value)
+    const rows = loaderRows.value
+    if (loaderName.value !== null && !rows.some((row) => row.loader === loaderName.value)) {
+        loaderName.value = null
+        loaderVersion.value = null
+    }
+}
+
+/** 换游戏版本后，加载器一栏与已选加载器都要重算 */
+async function pickGame(id: string): Promise<void> {
     if (id === game.value) {
         return
     }
@@ -204,7 +218,11 @@ function pickGame(id: string): void {
     expanded.value = null
     expandedPage.value = null
     loaderVersion.value = null
+    await loadLoadersOfGame()
 }
+
+/** 这个游戏版本上真的有版本的加载器 */
+const loaderRows = computed(() => install.availableLoaders.filter((row) => row.total > 0))
 
 async function toggleLoader(name: string): Promise<void> {
     if (expanded.value === name) {
@@ -372,96 +390,112 @@ function reportFailure(): void {
         </CollapsibleGroup>
 
         <CollapsibleGroup label="加载器" default-open>
-            <div class="install__loader">
-                <div class="install__loader-row">
-                    <button
-                        type="button"
-                        class="install__loader-name"
-                        :class="{ 'install__loader-name--on': loaderName === null }"
-                        :disabled="install.busy"
-                        @click="chooseLoader(null, null)"
-                    >
-                        原版
-                    </button>
-                    <span class="install__loader-meta">不装加载器</span>
-                </div>
-            </div>
-
-            <div v-for="row in install.loaders" :key="row.name" class="install__loader">
-                <div class="install__loader-row">
-                    <button
-                        type="button"
-                        class="install__loader-name"
-                        :class="{ 'install__loader-name--on': loaderName === row.name }"
-                        :disabled="install.busy"
-                        @click="chooseLoader(row.name, null)"
-                    >
-                        {{ row.name }}
-                    </button>
-                    <span class="install__loader-meta">
-                        最新 {{ row.latest ?? '没有' }} · {{ row.total }} 个版本
-                    </span>
-                    <GroupButton
-                        variant="ghost"
-                        :disabled="install.busy || game.length === 0"
-                        @click="toggleLoader(row.name)"
-                    >
-                        {{ expanded === row.name ? '收起' : '展开' }}
-                    </GroupButton>
-                </div>
-
-                <div v-if="expanded === row.name" class="install__loader-body">
-                    <p v-if="expandedLoading && expandedPage === null" class="install__note">
-                        读取中
-                    </p>
-                    <template v-else-if="expandedPage !== null">
-                        <p class="install__note">
-                            {{ game }} 上可用 {{ expandedPage.total }} 个 · 第
-                            {{ expandedPage.page }}/{{ expandedPage.pages }} 页
-                        </p>
-                        <div class="install__chips">
-                            <button
-                                type="button"
-                                class="install__chip"
-                                :class="{
-                                    'install__chip--on':
-                                        loaderName === row.name && loaderVersion === null,
-                                }"
-                                :disabled="install.busy"
-                                @click="chooseLoader(row.name, null)"
-                            >
-                                最新
-                            </button>
-                            <button
-                                v-for="item in expandedPage.versions"
-                                :key="item.version"
-                                type="button"
-                                class="install__chip"
-                                :class="{
-                                    'install__chip--on':
-                                        loaderName === row.name && loaderVersion === item.version,
-                                }"
-                                :disabled="install.busy"
-                                @click="chooseLoader(row.name, item.version)"
-                            >
-                                {{ item.version }}
-                                <span class="install__chip-channel">
-                                    {{ CHANNEL_LABEL[item.channel] }}
-                                </span>
-                            </button>
-                        </div>
-                        <GroupButton
-                            v-if="expandedPage.page < expandedPage.pages"
-                            variant="ghost"
-                            :disabled="expandedLoading || install.busy"
-                            @click="loadMore"
+            <p v-if="game.length === 0" class="install__note">先选游戏版本</p>
+            <p v-else-if="install.availableLoading" class="install__note">读取中</p>
+            <template v-else>
+                <div class="install__loader">
+                    <div class="install__loader-row">
+                        <button
+                            type="button"
+                            class="install__loader-name"
+                            :class="{ 'install__loader-name--on': loaderName === null }"
+                            :disabled="install.busy"
+                            @click="chooseLoader(null, null)"
                         >
-                            {{ expandedLoading ? '读取中' : '加载更多' }}
-                        </GroupButton>
-                    </template>
-                    <p v-else class="install__note">这个游戏版本上没有可用版本</p>
+                            原版
+                        </button>
+                        <span class="install__loader-meta">不装加载器</span>
+                    </div>
                 </div>
-            </div>
+
+                <div v-for="row in loaderRows" :key="row.loader" class="install__loader">
+                    <div class="install__loader-row">
+                        <button
+                            type="button"
+                            class="install__loader-name"
+                            :class="{ 'install__loader-name--on': loaderName === row.loader }"
+                            :disabled="install.busy"
+                            @click="chooseLoader(row.loader, null)"
+                        >
+                            {{ row.loader }}
+                        </button>
+                        <span class="install__loader-meta">
+                            最新 {{ row.latest ?? '没有' }} · {{ row.total }} 个版本
+                        </span>
+                        <GroupButton
+                            variant="ghost"
+                            :disabled="install.busy"
+                            @click="toggleLoader(row.loader)"
+                        >
+                            {{ expanded === row.loader ? '收起' : '展开' }}
+                        </GroupButton>
+                    </div>
+
+                    <div v-if="expanded === row.loader" class="install__loader-body">
+                        <p v-if="expandedLoading && expandedPage === null" class="install__note">
+                            读取中
+                        </p>
+                        <template v-else-if="expandedPage !== null">
+                            <p class="install__note">
+                                {{ game }} 上可用 {{ expandedPage.total }} 个 · 第
+                                {{ expandedPage.page }}/{{ expandedPage.pages }} 页
+                            </p>
+                            <div class="install__chips">
+                                <button
+                                    type="button"
+                                    class="install__chip"
+                                    :class="{
+                                        'install__chip--on':
+                                            loaderName === row.loader && loaderVersion === null,
+                                    }"
+                                    :disabled="install.busy"
+                                    @click="chooseLoader(row.loader, null)"
+                                >
+                                    最新
+                                </button>
+                                <button
+                                    v-for="item in expandedPage.versions"
+                                    :key="item.version"
+                                    type="button"
+                                    class="install__chip"
+                                    :class="{
+                                        'install__chip--on':
+                                            loaderName === row.loader &&
+                                            loaderVersion === item.version,
+                                    }"
+                                    :disabled="install.busy"
+                                    @click="chooseLoader(row.loader, item.version)"
+                                >
+                                    {{ item.version }}
+                                    <span class="install__chip-channel">
+                                        {{ CHANNEL_LABEL[item.channel] }}
+                                    </span>
+                                </button>
+                            </div>
+                            <GroupButton
+                                v-if="expandedPage.page < expandedPage.pages"
+                                variant="ghost"
+                                :disabled="expandedLoading || install.busy"
+                                @click="loadMore"
+                            >
+                                {{ expandedLoading ? '读取中' : '加载更多' }}
+                            </GroupButton>
+                        </template>
+                        <p v-else class="install__note">这个游戏版本上没有可用版本</p>
+                    </div>
+                </div>
+
+                <p class="install__note">
+                    {{ game }} 上可装 {{ loaderRows.length }} 种加载器 · 没有这个版本记录的不列
+                </p>
+                <p
+                    v-for="warning in install.availableWarnings"
+                    :key="warning"
+                    class="install__note"
+                >
+                    {{ warning }}
+                </p>
+            </template>
         </CollapsibleGroup>
 
         <CollapsibleGroup label="目标" default-open>

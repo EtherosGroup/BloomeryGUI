@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { killCli } from '@/api/transport.tauri'
 import type {
+    CliGameLoader,
+    CliGameLoaderPage,
     CliInstallReport,
-    CliLoaderOverview,
     CliLoaderPage,
     CliProgressEvent,
 } from '@/api/types'
@@ -51,30 +52,33 @@ export const useInstallService = defineStore('InstallService', () => {
     const cancelled = ref(false)
     const target = ref<InstallTarget | null>(null)
 
-    /** 四种加载器概览，来自 view loader */
-    const loaders = ref<CliLoaderOverview[]>([])
-    const loadersLoading = ref(false)
+    /** 选定游戏版本上各加载器的规模，来自 view game */
+    const availableLoaders = ref<CliGameLoader[]>([])
+    const availableWarnings = ref<string[]>([])
+    const availableLoading = ref(false)
     const loadersFailure = ref<InstallFailure | null>(null)
 
     /** 最近一条进度 */
     const latest = computed(() => events.value[events.value.length - 1] ?? null)
     const running = computed(() => busy.value)
 
-    /** 四种加载器各自的最新版与版本数 */
-    async function loadLoaders(): Promise<void> {
-        loadersLoading.value = true
+    /** 某个游戏版本上四种加载器各有多少版本，没有的给 0 */
+    async function loadAvailableLoaders(game: string): Promise<void> {
+        availableLoading.value = true
         loadersFailure.value = null
         try {
             const client = await useCli().client()
-            const result = await client.run<{ loaders?: CliLoaderOverview[] }>(['view', 'loader'], {
+            const result = await client.run<CliGameLoaderPage>(['view', 'game', game], {
                 progress: false,
             })
-            loaders.value = Array.isArray(result.loaders) ? result.loaders : []
+            availableLoaders.value = Array.isArray(result.loaders) ? result.loaders : []
+            availableWarnings.value = Array.isArray(result.warnings) ? result.warnings : []
         } catch (error) {
-            loaders.value = []
+            availableLoaders.value = []
+            availableWarnings.value = []
             loadersFailure.value = toFailure(error)
         } finally {
-            loadersLoading.value = false
+            availableLoading.value = false
         }
     }
 
@@ -174,12 +178,13 @@ export const useInstallService = defineStore('InstallService', () => {
         report,
         cancelled,
         target,
-        loaders,
-        loadersLoading,
+        availableLoaders,
+        availableWarnings,
+        availableLoading,
         loadersFailure,
         latest,
         running,
-        loadLoaders,
+        loadAvailableLoaders,
         queryLoader,
         start,
         cancel,
