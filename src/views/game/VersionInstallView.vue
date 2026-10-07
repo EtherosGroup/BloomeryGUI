@@ -47,6 +47,9 @@ const displayName = ref('')
 /** 清单上千条，一次只列这么多 */
 const SHOW_LIMIT = 60
 
+/** 占位行数量，与真实行同布局同高度 */
+const SKELETON_ROWS = [0, 1, 2, 3, 4, 5]
+
 const CHANNEL_LABEL: Record<CliLoaderChannel, string> = {
     release: '正式',
     beta: '测试',
@@ -381,36 +384,88 @@ function reportFailure(): void {
         </p>
 
         <CollapsibleGroup label="游戏版本" default-open>
-            <GroupInput v-model="keyword" label="筛选" placeholder="版本号，例如 1.20" />
-            <GroupSelect v-model="typeFilter" label="类型" :options="typeOptions" />
-            <p class="install__note">
-                匹配 {{ filtered.length }} 个 · 列出前
-                {{ Math.min(filtered.length, SHOW_LIMIT) }} 个{{
-                    filtered.length > SHOW_LIMIT ? ' · 用筛选缩小范围' : ''
-                }}
-            </p>
-            <ul class="install__versions">
-                <li v-for="row in visibleVersions" :key="row.id">
-                    <button
-                        type="button"
-                        class="install__version"
-                        :class="{ 'install__version--on': row.id === game }"
-                        :disabled="install.busy"
-                        @click="pickGame(row.id)"
-                    >
-                        <span class="install__version-id">{{ row.id }}</span>
-                        <span class="install__tag">{{ versionTypeLabel(row.type) }}</span>
-                        <span class="install__version-time">{{
-                            row.releaseTime.slice(0, 10)
-                        }}</span>
-                    </button>
-                </li>
-            </ul>
+            <GroupInput
+                v-model="keyword"
+                label="筛选"
+                placeholder="版本号，例如 1.20"
+                :disabled="versionsLoading"
+            />
+            <GroupSelect
+                v-model="typeFilter"
+                label="类型"
+                :options="typeOptions"
+                :disabled="versionsLoading"
+            />
+            <div v-if="versionsLoading" class="install__versions" aria-busy="true">
+                <div v-for="row in SKELETON_ROWS" :key="row" class="install__version install__wait">
+                    <span
+                        class="install__skeleton"
+                        :style="{ width: `${38 + (row % 3) * 12}%`, height: '1.05rem' }"
+                        aria-hidden="true"
+                    ></span>
+                    <span
+                        class="install__skeleton"
+                        style="width: 3.2rem; height: 0.95rem"
+                        aria-hidden="true"
+                    ></span>
+                    <span
+                        class="install__skeleton"
+                        style="width: 4.2rem; height: 0.95rem"
+                        aria-hidden="true"
+                    ></span>
+                </div>
+            </div>
+            <template v-else>
+                <p class="install__note">
+                    匹配 {{ filtered.length }} 个 · 列出前
+                    {{ Math.min(filtered.length, SHOW_LIMIT) }} 个{{
+                        filtered.length > SHOW_LIMIT ? ' · 用筛选缩小范围' : ''
+                    }}
+                </p>
+                <ul class="install__versions">
+                    <li v-for="row in visibleVersions" :key="row.id">
+                        <button
+                            type="button"
+                            class="install__version"
+                            :class="{ 'install__version--on': row.id === game }"
+                            :disabled="install.busy"
+                            @click="pickGame(row.id)"
+                        >
+                            <span class="install__version-id">{{ row.id }}</span>
+                            <span class="install__tag">{{ versionTypeLabel(row.type) }}</span>
+                            <span class="install__version-time">{{
+                                row.releaseTime.slice(0, 10)
+                            }}</span>
+                        </button>
+                    </li>
+                </ul>
+            </template>
         </CollapsibleGroup>
 
         <CollapsibleGroup label="加载器" default-open>
             <p v-if="game.length === 0" class="install__note">请选择一个游戏版本</p>
-            <p v-else-if="install.availableLoading" class="install__note">读取中</p>
+            <template v-else-if="install.availableLoading">
+                <div class="install__loader" aria-busy="true">
+                    <div v-for="row in SKELETON_ROWS" :key="row" class="install__loader-row">
+                        <span
+                            class="install__skeleton"
+                            style="width: 4.6rem; height: 1.9rem"
+                            aria-hidden="true"
+                        ></span>
+                        <span
+                            class="install__skeleton"
+                            :style="{ width: `${24 + (row % 3) * 10}%`, height: '0.95rem' }"
+                            aria-hidden="true"
+                        ></span>
+                        <span
+                            class="install__skeleton"
+                            style="width: 3.6rem; height: 2.3rem"
+                            aria-hidden="true"
+                        ></span>
+                    </div>
+                </div>
+                <p class="install__note">四家加载器各取一次，约二十秒</p>
+            </template>
             <template v-else>
                 <div class="install__loader">
                     <div class="install__loader-row">
@@ -451,9 +506,19 @@ function reportFailure(): void {
                     </div>
 
                     <div v-if="expanded === row.loader" class="install__loader-body">
-                        <p v-if="expandedLoading && expandedPage === null" class="install__note">
-                            读取中
-                        </p>
+                        <div
+                            v-if="expandedLoading && expandedPage === null"
+                            class="install__chips"
+                            aria-busy="true"
+                        >
+                            <span
+                                v-for="row in SKELETON_ROWS"
+                                :key="row"
+                                class="install__skeleton"
+                                :style="{ width: `${3.6 + (row % 3) * 1.4}rem`, height: '1.35rem' }"
+                                aria-hidden="true"
+                            ></span>
+                        </div>
                         <template v-else-if="expandedPage !== null">
                             <p class="install__note">
                                 {{ game }} 上可用 {{ expandedPage.total }} 个 · 第
@@ -600,6 +665,9 @@ function reportFailure(): void {
     --clickable-bg: color-mix(in srgb, var(--text-color) 8%, var(--group-content-bg));
     --clickable-bg-hover: color-mix(in srgb, var(--text-color) 16%, var(--group-content-bg));
     --clickable-bg-active: color-mix(in srgb, var(--text-color) 26%, var(--group-content-bg));
+    // 占位底色与扫光
+    --skeleton-bg: color-mix(in srgb, var(--text-color) 18%, var(--group-content-bg));
+    --skeleton-glow: color-mix(in srgb, var(--text-color) 34%, transparent);
 }
 
 .install__head {
@@ -728,6 +796,44 @@ function reportFailure(): void {
 .install__version-time {
     color: var(--text-color-dark);
     font-size: var(--font-size-xs);
+}
+
+/* 占位：与真实行同布局同高度，出内容前不跳动 */
+.install__wait {
+    pointer-events: none;
+}
+
+.install__skeleton {
+    position: relative;
+    flex: 0 0 auto;
+    overflow: hidden;
+
+    background-color: var(--skeleton-bg);
+    border-radius: calc(var(--border-radius) / 2);
+
+    &::after {
+        content: '';
+
+        position: absolute;
+        inset: 0;
+
+        background-image: linear-gradient(90deg, transparent, var(--skeleton-glow), transparent);
+        transform: translateX(-100%);
+
+        animation: install-sweep 1.4s linear infinite;
+    }
+}
+
+@keyframes install-sweep {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .install__skeleton::after {
+        animation: none;
+    }
 }
 
 .install__tag {
