@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
+import { pathStamps } from '@/api/files'
 import type { CliFolder, CliVersionList } from '@/api/types'
 import { useCli } from '@/composables/useCli'
 
@@ -34,6 +35,10 @@ function toFailure(error: unknown): VersionFailure {
 export const useVersionService = defineStore('VersionService', () => {
     /** 已登记的文件夹，来自 folder list */
     const folders = ref<CliFolder[]>([])
+    /** 是否成功取过一次：首屏据此决定出骨架还是出内容 */
+    const loaded = ref(false)
+    /** 各文件夹 versions 目录的指纹，用来判断要不要重取 */
+    const stamps = ref<Record<string, string>>({})
     const foldersLoading = ref(false)
     const foldersFailure = ref<VersionFailure | null>(null)
 
@@ -142,14 +147,85 @@ export const useVersionService = defineStore('VersionService', () => {
     /** 全部刷新：已加载过的文件夹都重拉 */
     async function reloadAll(): Promise<void> {
         await loadFolders()
-        const loaded = Object.keys(lists.value)
-        for (const folderId of loaded) {
+        const known = Object.keys(lists.value)
+        for (const folderId of known) {
             await loadList(folderId)
         }
         const folderId = currentFolderId.value
-        if (folderId.length > 0 && !loaded.includes(folderId)) {
+        if (folderId.length > 0 && !known.includes(folderId)) {
             await loadList(folderId)
         }
+        const next = await readStamps()
+        if (next !== null) {
+            stamps.value = next
+        }
+    }
+
+    /** 某文件夹的 versions 目录：优先用 CLI 给的那条 */
+    function versionsPathOf(folderId: string): string {
+        const list = lists.value[folderId]
+        if (list !== undefined && list !== null && typeof list.versionsDirectory === 'string') {
+            return list.versionsDirectory
+        }
+        const folder = folders.value.find((item) => item.id === folderId)
+        if (folder === undefined) {
+            return ''
+        }
+        const separator = folder.path.includes('\\') ? '\\' : '/'
+        return `${folder.path.replace(/[\\/]+$/, '')}${separator}versions`
+    }
+
+    /** 取各文件夹 versions 目录的指纹；取不到返回 null */
+    async function readStamps(): Promise<Record<string, string> | null> {
+        const targets = folders.value
+            .map((folder) => ({ id: folder.id, path: versionsPathOf(folder.id) }))
+            .filter((item) => item.path.length > 0)
+        if (targets.length === 0) {
+            return {}
+        }
+        const rows = await pathStamps(targets.map((item) => item.path)).catch(() => null)
+        if (rows === null) {
+            return null
+        }
+        const next: Record<string, string> = {}
+        for (const [index, item] of targets.entries()) {
+            const stamp = rows[index]
+            next[item.id] =
+                stamp === undefined ? '' : `${item.path}|${stamp.mtime}|${stamp.entries}`
+        }
+        return next
+    }
+
+    /**
+     * 首屏：没取过就取，取过就只补有变动的文件夹
+     *
+     * 指纹变了才重取，避免每次进页面都把列表重画一遍
+     */
+    async function ensureFresh(): Promise<void> {
+        if (!loaded.value) {
+            await load()
+            loaded.value = foldersFailure.value === null
+            const first = await readStamps()
+            if (first !== null) {
+                stamps.value = first
+            }
+            return
+        }
+
+        const next = await readStamps()
+        if (next === null) {
+            return
+        }
+        const changed = Object.keys(next).filter((id) => next[id] !== stamps.value[id])
+        stamps.value = next
+        if (changed.length === 0) {
+            return
+        }
+        for (const folderId of changed) {
+            await loadList(folderId)
+        }
+        // 实例数在 folder list 里，变动后一并重取
+        await loadFolders()
     }
 
     /** 选中实例：带上所属文件夹，切完重拉该文件夹 */
@@ -263,8 +339,10 @@ export const useVersionService = defineStore('VersionService', () => {
         listOf,
         loadFolders,
         loadList,
+        loaded,
         load,
         reloadAll,
+        ensureFresh,
         select,
         setCurrentFolder,
         addFolder,

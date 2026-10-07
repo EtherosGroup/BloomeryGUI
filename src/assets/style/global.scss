@@ -43,4 +43,40 @@ p {
     --border-radius: 12px;
     --transition-duration: 0.25s;
     --transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    /* 骨架占位：以分组内容区为底、按文字色提两档，两套主题跟着走 */
+    --skeleton-bg: color-mix(in srgb, var(--text-color) 18%, var(--group-content-bg));
+    --skeleton-glow: color-mix(in srgb, var(--text-color) 34%, transparent);
+}
+
+/* 骨架占位块：尺寸由使用处给，块内一条扫光 */
+.skeleton {
+    position: relative;
+    overflow: hidden;
+
+    background-color: var(--skeleton-bg);
+    border-radius: calc(var(--border-radius) / 2);
+
+    &::after {
+        content: '';
+
+        position: absolute;
+        inset: 0;
+
+        background-image: linear-gradient(90deg, transparent, var(--skeleton-glow), transparent);
+        transform: translateX(-100%);
+
+        animation: skeleton-sweep 1.4s linear infinite;
+    }
+}
+
+@keyframes skeleton-sweep {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+        animation: none;
+    }
 }

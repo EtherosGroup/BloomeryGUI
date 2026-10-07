@@ -418,17 +418,17 @@ function reportFailure(): void {
             <div v-if="versionsLoading" class="install__versions" aria-busy="true">
                 <div v-for="row in SKELETON_ROWS" :key="row" class="install__version install__wait">
                     <span
-                        class="install__skeleton"
+                        class="skeleton"
                         :style="{ width: `${38 + (row % 3) * 12}%`, height: '1.05rem' }"
                         aria-hidden="true"
                     ></span>
                     <span
-                        class="install__skeleton"
+                        class="skeleton"
                         style="width: 3.2rem; height: 0.95rem"
                         aria-hidden="true"
                     ></span>
                     <span
-                        class="install__skeleton"
+                        class="skeleton"
                         style="width: 4.2rem; height: 0.95rem"
                         aria-hidden="true"
                     ></span>
@@ -512,7 +512,7 @@ function reportFailure(): void {
                                 <span
                                     v-for="row in SKELETON_ROWS"
                                     :key="row"
-                                    class="install__skeleton"
+                                    class="skeleton"
                                     :style="{
                                         width: `${3.6 + (row % 3) * 1.4}rem`,
                                         height: '1.35rem',
@@ -572,17 +572,17 @@ function reportFailure(): void {
 
                     <div v-else class="install__loader-row" aria-busy="true">
                         <span
-                            class="install__skeleton"
+                            class="skeleton"
                             style="width: 4.6rem; height: 1.9rem"
                             aria-hidden="true"
                         ></span>
                         <span
-                            class="install__skeleton"
+                            class="skeleton"
                             :style="{ width: `${24 + (index % 3) * 10}%`, height: '0.95rem' }"
                             aria-hidden="true"
                         ></span>
                         <span
-                            class="install__skeleton"
+                            class="skeleton"
                             style="width: 3.6rem; height: 2.3rem"
                             aria-hidden="true"
                         ></span>
@@ -685,9 +685,6 @@ function reportFailure(): void {
     --clickable-bg: color-mix(in srgb, var(--text-color) 8%, var(--group-content-bg));
     --clickable-bg-hover: color-mix(in srgb, var(--text-color) 16%, var(--group-content-bg));
     --clickable-bg-active: color-mix(in srgb, var(--text-color) 26%, var(--group-content-bg));
-    // 占位底色与扫光
-    --skeleton-bg: color-mix(in srgb, var(--text-color) 18%, var(--group-content-bg));
-    --skeleton-glow: color-mix(in srgb, var(--text-color) 34%, transparent);
 }
 
 .install__head {
@@ -794,6 +791,11 @@ function reportFailure(): void {
 }
 
 /* 选中：反色，一眼看出选的是哪一条 */
+/* 占位行只是盒子，不能点 */
+.install__wait {
+    pointer-events: none;
+}
+
 .install__version--on {
     color: var(--text-color-opposite);
     background-color: var(--bg-opposite);
@@ -816,44 +818,6 @@ function reportFailure(): void {
 .install__version-time {
     color: var(--text-color-dark);
     font-size: var(--font-size-xs);
-}
-
-/* 占位：与真实行同布局同高度，出内容前不跳动 */
-.install__wait {
-    pointer-events: none;
-}
-
-.install__skeleton {
-    position: relative;
-    flex: 0 0 auto;
-    overflow: hidden;
-
-    background-color: var(--skeleton-bg);
-    border-radius: calc(var(--border-radius) / 2);
-
-    &::after {
-        content: '';
-
-        position: absolute;
-        inset: 0;
-
-        background-image: linear-gradient(90deg, transparent, var(--skeleton-glow), transparent);
-        transform: translateX(-100%);
-
-        animation: install-sweep 1.4s linear infinite;
-    }
-}
-
-@keyframes install-sweep {
-    to {
-        transform: translateX(100%);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .install__skeleton::after {
-        animation: none;
-    }
 }
 
 .install__tag {

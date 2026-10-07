@@ -31,6 +31,15 @@ const keyword = ref('')
 /** 每个文件夹的展开状态，展开时懒加载 */
 const opened = ref<Record<string, boolean>>({})
 
+/** 占位组数与组里的行数，盒子与真实行对齐 */
+const SKELETON_GROUPS = [0, 1]
+const SKELETON_ROWS = [0, 1, 2]
+
+/** 首次取数据、还没有任何文件夹时出骨架 */
+const firstLoad = computed(
+    () => versionService.foldersLoading && versionService.folders.length === 0,
+)
+
 /** 当前文件夹置顶，其余按名字 */
 const orderedFolders = computed<CliFolder[]>(() => {
     const all = [...versionService.folders]
@@ -279,7 +288,7 @@ const confirmRows = computed(() => {
 })
 
 onMounted(async () => {
-    await versionService.load()
+    await versionService.ensureFresh()
     const first = versionService.currentFolderId
     if (first.length > 0) {
         opened.value = { ...opened.value, [first]: true }
@@ -328,9 +337,24 @@ onMounted(async () => {
             v-model="keyword"
             label="筛选"
             placeholder="实例名 / 游戏版本 / 加载器 / 状态"
+            :disabled="firstLoad"
         />
 
-        <p v-if="orderedFolders.length === 0" class="versions__note">还没有登记任何游戏文件夹</p>
+        <div v-if="firstLoad" class="versions__skeleton" aria-busy="true">
+            <div v-for="group in SKELETON_GROUPS" :key="group" class="versions__skeleton-group">
+                <span class="skeleton versions__skeleton-head" aria-hidden="true"></span>
+                <div class="versions__skeleton-body">
+                    <div v-for="row in SKELETON_ROWS" :key="row" class="versions__row-wait">
+                        <span class="skeleton versions__skeleton-row" aria-hidden="true"></span>
+                        <span class="skeleton versions__skeleton-gear" aria-hidden="true"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <p v-else-if="orderedFolders.length === 0" class="versions__note">
+            还没有登记任何游戏文件夹
+        </p>
 
         <CollapsibleGroup
             v-for="folder in orderedFolders"
@@ -359,7 +383,19 @@ onMounted(async () => {
 
             <p v-if="!folder.exists" class="versions__note">该目录不存在，未读取实例</p>
 
-            <p v-else-if="versionService.loadingFolder(folder.id)" class="versions__note">读取中</p>
+            <div
+                v-else-if="
+                    versionService.loadingFolder(folder.id) &&
+                    versionService.listOf(folder.id) === null
+                "
+                class="versions__list versions__list--wait"
+                aria-busy="true"
+            >
+                <div v-for="row in SKELETON_ROWS" :key="row" class="versions__row-wait">
+                    <span class="skeleton versions__skeleton-row" aria-hidden="true"></span>
+                    <span class="skeleton versions__skeleton-gear" aria-hidden="true"></span>
+                </div>
+            </div>
 
             <p v-else-if="versionService.failureOf(folder.id)" class="versions__group-failure">
                 {{
@@ -828,6 +864,64 @@ onMounted(async () => {
 
     background-color: var(--button-bg-color);
     border-radius: calc(var(--border-radius) / 2);
+}
+
+/* 首屏骨架：与折叠组、实例行同盒模型，出数据前不跳动 */
+.versions__skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.versions__skeleton-group {
+    background-color: var(--group-content-bg);
+    border: 1px solid color-mix(in srgb, var(--text-color) 10%, transparent);
+    border-radius: var(--border-radius);
+}
+
+.versions__skeleton-head {
+    display: block;
+    height: 2.75rem;
+}
+
+.versions__skeleton-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    padding: 0.5rem 0.75rem;
+}
+
+.versions__row-wait {
+    display: flex;
+    align-items: stretch;
+    gap: 0.35rem;
+}
+
+.versions__skeleton-row {
+    flex: 1;
+    min-width: 0;
+    height: 2.6rem;
+
+    border-radius: var(--border-radius);
+}
+
+.versions__skeleton-gear {
+    flex: 0 0 auto;
+
+    width: 2.25rem;
+    height: 2.6rem;
+
+    border-radius: var(--border-radius);
+}
+
+.versions__list--wait {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    margin: 0;
+    padding: 0;
 }
 
 .versions__folder-row {
