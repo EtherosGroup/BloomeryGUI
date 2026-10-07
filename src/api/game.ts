@@ -9,12 +9,19 @@ export interface GameStatus {
     evidence: string
 }
 
+/** 一个要看的日志：只看启动时记下的偏移之后的内容 */
+export interface GameLog {
+    path: string
+    /** 启动时的文件大小 */
+    since: number
+}
+
 /** 查询游戏进程与窗口状态 */
-/** focus：窗口首次出现时把游戏带到前台（每次启动只该传一次 true） */
-export async function gameStatus(
-    pid: number | null,
-    logs: string[] | null,
-    focus = false,
-): Promise<GameStatus> {
-    return await invoke<GameStatus>('game_status', { pid, logs, focus })
+export async function gameStatus(pid: number | null, logs: GameLog[] | null): Promise<GameStatus> {
+    return await invoke<GameStatus>('game_status', { pid, logs })
+}
+
+/** 记录日志当前大小，作为本次启动的水位 */
+export async function logSizes(paths: string[]): Promise<number[]> {
+    return await invoke<number[]>('log_sizes', { paths })
 }

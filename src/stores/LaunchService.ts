@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { killCli } from '@/api/transport.tauri'
 import { appendDiag } from '@/api/diagnostics'
-import { gameStatus } from '@/api/game'
+import { gameStatus, logSizes, type GameLog } from '@/api/game'
 import type { CliLaunchResult, CliProgressEvent } from '@/api/types'
 import { useCli } from '@/composables/useCli'
 
@@ -67,8 +67,10 @@ export const useLaunchService = defineStore(
             folder.value = scope
             plan.value = null
             pid.value = null
-            windowReadyOnce = false
             logPath.value = ''
+            gameDirectory.value = ''
+            logs.value = []
+            pollTicks = 0
             windowEvidence.value = ''
             events.value = []
             failure.value = null
@@ -98,10 +100,10 @@ export const useLaunchService = defineStore(
 
         /** 游戏目录：用于读游戏自己的日志 */
         const gameDirectory = ref('')
+        /** 本次启动要看的日志与水位 */
+        const logs = ref<GameLog[]>([])
         /** 轮询次数，用于诊断心跳 */
         let pollTicks = 0
-        /** 本次启动是否已经把游戏窗口带到前台（只做一次） */
-        let windowReadyOnce = false
 
         let pollTimer: number | undefined
 
@@ -113,9 +115,23 @@ export const useLaunchService = defineStore(
         }
 
         /**
-         * 轮询：窗口标志行出现即算完成
-         * 日志看两处 —— CLI 捕获的游戏 stdout，以及游戏自己的 <游戏目录>/logs/latest.log
+         * 本次启动要看的日志：CLI 捕获的游戏 stdout，以及游戏自己的 <游戏目录>/logs/latest.log
+         * 启动时记下两份日志的大小作水位，上一次会话留下的标志行不算本次启动
          */
+        async function collectLogs(result: CliLaunchResult): Promise<GameLog[]> {
+            const paths = [
+                result.log ?? '',
+                gameDirectory.value.length > 0 ? `${gameDirectory.value}/logs/latest.log` : '',
+            ].filter((entry) => entry.length > 0)
+            try {
+                const sizes = await logSizes(paths)
+                return paths.map((path, index) => ({ path, since: sizes[index] ?? 0 }))
+            } catch {
+                // 记不下水位就只靠窗口枚举判定
+                return []
+            }
+        }
+
         /** 每秒问一次进程与日志：窗口标志行出现即算拉起完成 */
         function startPolling(): void {
             stopPolling()
@@ -123,13 +139,7 @@ export const useLaunchService = defineStore(
                 try {
                     const status = await gameStatus(
                         pid.value,
-                        [
-                            logPath.value,
-                            gameDirectory.value.length > 0
-                                ? `${gameDirectory.value}/logs/latest.log`
-                                : '',
-                        ].filter((entry) => entry.length > 0),
-                        !windowReadyOnce,
+                        logs.value.length > 0 ? logs.value : null,
                     )
                     if (status.evidence !== windowEvidence.value) {
                         trace(
@@ -144,13 +154,12 @@ export const useLaunchService = defineStore(
                     pollTicks += 1
                     // 每约 15 秒记一次心跳，避免"只在变化时记录"丢掉时间线
                     if (pollTicks % 10 === 0) {
-                        trace('窗口轮询心跳', windowEvidence.value, 'alive=', status.alive)
+                        trace('窗口轮询心跳', status.evidence, 'alive=', status.alive)
                     }
                     windowEvidence.value = status.evidence
                     if (status.windowReady) {
                         setStep('window', 'done')
                         stopPolling()
-                        windowReadyOnce = true
                         trace('窗口就绪', status.evidence)
                         return
                     }
@@ -203,6 +212,10 @@ export const useLaunchService = defineStore(
             events.value = []
             pid.value = null
             logPath.value = ''
+            // 同一个实例再启动一次时不会走 reset，水位要在这里清掉
+            gameDirectory.value = ''
+            logs.value = []
+            windowEvidence.value = ''
             setStep('verify', 'done')
             setStep('repair', 'current')
 
@@ -225,6 +238,7 @@ export const useLaunchService = defineStore(
                 pid.value = result.pid ?? null
                 logPath.value = result.log ?? ''
                 gameDirectory.value = result.directory ?? ''
+                logs.value = await collectLogs(result)
                 trace('launch 返回 pid=', result.pid ?? null, 'log=', result.log ?? '(无)')
                 setStep('repair', 'done')
                 setStep('spawn', 'done')
