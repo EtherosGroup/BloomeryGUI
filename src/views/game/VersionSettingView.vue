@@ -40,6 +40,10 @@ const folderId = ref('')
 /** 全局上限，只作对照 */
 const globalMaxMb = ref<number | null>(null)
 const instanceMaxMb = ref<number | null>(null)
+/** 实例自定义启动参数 */
+const instanceJvmArgs = ref<string[]>([])
+/** 全局 JVM 参数，只作对照 */
+const globalJvmArgs = ref<string[]>([])
 const failure = ref<Failure | null>(null)
 const busy = ref(false)
 const editing = ref('')
@@ -117,18 +121,33 @@ function folderArgs(): string[] {
     return ['--folder', folderId.value]
 }
 
-async function readConfig(args: string[]): Promise<number | null> {
+async function readValue(args: string[]): Promise<unknown> {
     const client = await useCli().client()
     const result = await client.run<{ key: string; value: unknown }>(['config', 'get', ...args], {
         progress: false,
     })
-    return typeof result.value === 'number' ? result.value : null
+    return result.value
 }
 
-/** 重读全局值与实例覆盖值 */
+async function readConfig(args: string[]): Promise<number | null> {
+    const value = await readValue(args)
+    return typeof value === 'number' ? value : null
+}
+
+/** 字符串数组类配置，取不到按空处理 */
+async function readArgs(args: string[]): Promise<string[]> {
+    const value = await readValue(args)
+    return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string')
+        : []
+}
+
+/** 重读全局值、实例覆盖值与启动参数 */
 async function refreshValues(): Promise<void> {
     globalMaxMb.value = await readConfig(['launch.memory.maxMb'])
     instanceMaxMb.value = await readConfig(instanceArgs(['memory.maxMb']))
+    globalJvmArgs.value = await readArgs(['launch.jvmArgs'])
+    instanceJvmArgs.value = await readArgs(instanceArgs(['jvmArgs']))
 }
 
 async function load(): Promise<void> {
@@ -155,6 +174,26 @@ async function load(): Promise<void> {
 function startEdit(value: number | null): void {
     editing.value = 'instance'
     draft.value = value === null ? '' : String(value)
+}
+
+/** 空格分隔，双引号包住带空格的整段 */
+function parseArgs(text: string): string[] {
+    const rows: string[] = []
+    for (const match of text.matchAll(/"([^"]*)"|(\S+)/g)) {
+        rows.push(match[1] ?? match[2] ?? '')
+    }
+    return rows
+}
+
+/** 带空格的整段加回引号，来回编辑不丢边界 */
+function argsText(rows: string[]): string {
+    return rows.map((row) => (/\s/.test(row) ? `"${row}"` : row)).join(' ')
+}
+
+/** 进入启动参数编辑态，草稿预填当前值 */
+function startEditArgs(): void {
+    editing.value = 'args'
+    draft.value = argsText(instanceJvmArgs.value)
 }
 
 /** 进入改名编辑态，草稿预填当前名 */
@@ -196,6 +235,40 @@ async function reset(): Promise<void> {
         await client.run(['config', 'unset', ...instanceArgs(['memory.maxMb'])], {
             progress: false,
         })
+        await refreshValues()
+    } catch (error) {
+        failure.value = toFailure(error)
+    } finally {
+        busy.value = false
+    }
+}
+
+/** 写实例启动参数：CLI 收 JSON 数组 */
+async function commitArgs(): Promise<void> {
+    busy.value = true
+    failure.value = null
+    try {
+        const client = await useCli().client()
+        const value = JSON.stringify(parseArgs(String(draft.value ?? '')))
+        await client.run(['config', 'set', ...instanceArgs(['jvmArgs', value])], {
+            progress: false,
+        })
+        await refreshValues()
+        editing.value = ''
+    } catch (error) {
+        failure.value = toFailure(error)
+    } finally {
+        busy.value = false
+    }
+}
+
+/** 清除实例启动参数 */
+async function resetArgs(): Promise<void> {
+    busy.value = true
+    failure.value = null
+    try {
+        const client = await useCli().client()
+        await client.run(['config', 'unset', ...instanceArgs(['jvmArgs'])], { progress: false })
         await refreshValues()
     } catch (error) {
         failure.value = toFailure(error)
@@ -391,8 +464,63 @@ watch(instanceId, load)
                     </div>
                 </div>
                 <p class="setting__note">
-                    全局参数在「设置」页修改 · 本页 config memory.maxMb --folder
+                    全局参数在「引擎设置」页修改 · 本页 config memory.maxMb --folder
                     {{ folderId || '<文件夹>' }} --instance {{ info.id }}
+                </p>
+            </CollapsibleGroup>
+
+            <CollapsibleGroup label="启动参数" default-open>
+                <div class="setting__rows">
+                    <div class="setting__row">
+                        <span class="setting__key">自定义</span>
+                        <span class="setting__value">
+                            <template v-if="editing === 'args'">
+                                <GroupInput
+                                    v-model="draft"
+                                    placeholder="-XX:+UseG1GC -Dfile.encoding=UTF-8"
+                                    :disabled="busy"
+                                />
+                                <GroupButton variant="ghost" :disabled="busy" @click="commitArgs">
+                                    保存
+                                </GroupButton>
+                                <GroupButton variant="ghost" @click="editing = ''"
+                                    >取消</GroupButton
+                                >
+                            </template>
+                            <template v-else>
+                                {{
+                                    instanceJvmArgs.length === 0
+                                        ? '未设置'
+                                        : argsText(instanceJvmArgs)
+                                }}
+                                <GroupButton
+                                    variant="ghost"
+                                    :disabled="busy"
+                                    @click="startEditArgs"
+                                >
+                                    修改
+                                </GroupButton>
+                                <GroupButton
+                                    variant="ghost"
+                                    :disabled="busy || instanceJvmArgs.length === 0"
+                                    @click="resetArgs"
+                                >
+                                    清除
+                                </GroupButton>
+                            </template>
+                        </span>
+                    </div>
+                    <div class="setting__row">
+                        <span class="setting__key">全局 JVM</span>
+                        <span class="setting__value setting__value--muted">
+                            {{ globalJvmArgs.length === 0 ? '未设置' : argsText(globalJvmArgs) }} ·
+                            只读
+                        </span>
+                    </div>
+                </div>
+                <p class="setting__note">
+                    空格分隔，双引号可包住一整段 · 启动时先给全局 JVM 参数，再接本实例的参数 ·
+                    config jvmArgs --folder {{ folderId || '<文件夹>' }} --instance {{ info.id }}
                 </p>
             </CollapsibleGroup>
         </template>
