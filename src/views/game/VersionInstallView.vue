@@ -173,12 +173,12 @@ function laneCount(row: { done: number; total: number; bytes: boolean }): string
     return `${text(row.done)}/${text(row.total)}`
 }
 
-/** 拉清单，默认选最新正式版 */
-async function loadVersions(): Promise<void> {
+/** 拉清单，默认选最新正式版；force 供刷新按钮 */
+async function loadVersions(force = false): Promise<void> {
     versionsLoading.value = true
     versionsFailure.value = ''
     try {
-        versions.value = await fetchGameVersions()
+        versions.value = await fetchGameVersions(force)
         const first = versions.value.find((row) => row.type === 'release') ?? versions.value[0]
         if (game.value.length === 0 && first !== undefined) {
             game.value = first.id
@@ -192,18 +192,26 @@ async function loadVersions(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
-    await loadVersions()
-    await loadLoadersOfGame()
+    install.dropLoaderCache()
+    await loadVersions(true)
+    await loadLoadersOfGame(true)
 }
 
 /** 加载器那栏按选定的游戏版本查，没有版本的不列 */
-async function loadLoadersOfGame(): Promise<void> {
-    if (game.value.length === 0) {
+async function loadLoadersOfGame(force = false): Promise<void> {
+    const wanted = game.value
+    if (wanted.length === 0) {
         return
     }
-    await install.loadAvailableLoaders(game.value)
-    const rows = loaderRows.value
-    if (loaderName.value !== null && !rows.some((row) => row.loader === loaderName.value)) {
+    await install.loadAvailableLoaders(wanted, force)
+    // 期间又换了版本，旧结果不参与判断
+    if (wanted !== game.value) {
+        return
+    }
+    if (
+        loaderName.value !== null &&
+        !loaderRows.value.some((row) => row.loader === loaderName.value)
+    ) {
         loaderName.value = null
         loaderVersion.value = null
     }
@@ -230,18 +238,21 @@ async function toggleLoader(name: string): Promise<void> {
         expandedPage.value = null
         return
     }
+    const wantedGame = game.value
     expanded.value = name
     expandedPage.value = null
     expandedLoading.value = true
     try {
-        const page = await install.queryLoader(name, game.value, 1)
-        if (page !== null) {
-            expandedPage.value = {
-                versions: page.versions,
-                page: page.page,
-                pages: page.pages,
-                total: page.total,
-            }
+        const page = await install.queryLoader(name, wantedGame, 1)
+        // 期间换了加载器或游戏版本就丢掉
+        if (page === null || expanded.value !== name || game.value !== wantedGame) {
+            return
+        }
+        expandedPage.value = {
+            versions: page.versions,
+            page: page.page,
+            pages: page.pages,
+            total: page.total,
         }
     } finally {
         expandedLoading.value = false
@@ -255,16 +266,24 @@ async function loadMore(): Promise<void> {
     if (current === null || name === null || current.page >= current.pages) {
         return
     }
+    const wantedGame = game.value
     expandedLoading.value = true
     try {
-        const page = await install.queryLoader(name, game.value, current.page + 1)
-        if (page !== null) {
-            expandedPage.value = {
-                versions: [...current.versions, ...page.versions],
-                page: page.page,
-                pages: page.pages,
-                total: page.total,
-            }
+        const page = await install.queryLoader(name, wantedGame, current.page + 1)
+        // 期间换了加载器、游戏版本或已翻过页就丢掉
+        if (
+            page === null ||
+            expanded.value !== name ||
+            game.value !== wantedGame ||
+            expandedPage.value !== current
+        ) {
+            return
+        }
+        expandedPage.value = {
+            versions: [...current.versions, ...page.versions],
+            page: page.page,
+            pages: page.pages,
+            total: page.total,
         }
     } finally {
         expandedLoading.value = false

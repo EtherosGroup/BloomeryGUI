@@ -23,8 +23,14 @@ function isVersion(row: unknown): row is { id: string; type: string; releaseTime
     return typeof entry.id === 'string' && typeof entry.type === 'string'
 }
 
+/** 清单在进程内取一次就够，force 供刷新按钮用 */
+let cached: GameVersion[] | null = null
+
 /** 拉可安装的游戏版本，清单本身新在前 */
-export async function fetchGameVersions(): Promise<GameVersion[]> {
+export async function fetchGameVersions(force = false): Promise<GameVersion[]> {
+    if (!force && cached !== null) {
+        return cached
+    }
     const response = await fetch(MANIFEST_URL)
     if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -32,9 +38,10 @@ export async function fetchGameVersions(): Promise<GameVersion[]> {
     const body = (await response.json()) as { versions?: unknown }
     const rows = Array.isArray(body.versions) ? body.versions : []
 
-    return rows.filter(isVersion).map((row) => ({
+    cached = rows.filter(isVersion).map((row) => ({
         id: row.id,
         type: row.type,
         releaseTime: typeof row.releaseTime === 'string' ? row.releaseTime : '',
     }))
+    return cached
 }

@@ -58,12 +58,27 @@ export const useInstallService = defineStore('InstallService', () => {
     const availableLoading = ref(false)
     const loadersFailure = ref<InstallFailure | null>(null)
 
+    /** 已取过的结果：进程内缓存，活到应用重启；刷新走 force */
+    const availableCache = ref<Record<string, CliGameLoader[]>>({})
+    const warningsCache = ref<Record<string, string[]>>({})
+    const pageCache = ref<Record<string, CliLoaderPage>>({})
+    /** 换游戏版本时，晚回来的旧请求作废 */
+    let loadersSeq = 0
+
     /** 最近一条进度 */
     const latest = computed(() => events.value[events.value.length - 1] ?? null)
     const running = computed(() => busy.value)
 
     /** 某个游戏版本上四种加载器各有多少版本，没有的给 0 */
-    async function loadAvailableLoaders(game: string): Promise<void> {
+    async function loadAvailableLoaders(game: string, force = false): Promise<void> {
+        const cached = availableCache.value[game]
+        if (!force && cached !== undefined) {
+            availableLoaders.value = cached
+            availableWarnings.value = warningsCache.value[game] ?? []
+            return
+        }
+
+        const seq = ++loadersSeq
         availableLoading.value = true
         loadersFailure.value = null
         try {
@@ -71,14 +86,26 @@ export const useInstallService = defineStore('InstallService', () => {
             const result = await client.run<CliGameLoaderPage>(['view', 'game', game], {
                 progress: false,
             })
-            availableLoaders.value = Array.isArray(result.loaders) ? result.loaders : []
-            availableWarnings.value = Array.isArray(result.warnings) ? result.warnings : []
+            const rows = Array.isArray(result.loaders) ? result.loaders : []
+            const warnings = Array.isArray(result.warnings) ? result.warnings : []
+            availableCache.value = { ...availableCache.value, [game]: rows }
+            warningsCache.value = { ...warningsCache.value, [game]: warnings }
+            if (seq !== loadersSeq) {
+                return
+            }
+            availableLoaders.value = rows
+            availableWarnings.value = warnings
         } catch (error) {
+            if (seq !== loadersSeq) {
+                return
+            }
             availableLoaders.value = []
             availableWarnings.value = []
             loadersFailure.value = toFailure(error)
         } finally {
-            availableLoading.value = false
+            if (seq === loadersSeq) {
+                availableLoading.value = false
+            }
         }
     }
 
@@ -87,7 +114,14 @@ export const useInstallService = defineStore('InstallService', () => {
         loader: string,
         game: string,
         page = 1,
+        force = false,
     ): Promise<CliLoaderPage | null> {
+        const key = `${loader}/${game}/${page}`
+        const cached = pageCache.value[key]
+        if (!force && cached !== undefined) {
+            return cached
+        }
+
         loadersFailure.value = null
         try {
             const client = await useCli().client()
@@ -95,7 +129,11 @@ export const useInstallService = defineStore('InstallService', () => {
                 ['view', 'loader', loader, '--game', game, '--page', String(page)],
                 { progress: false },
             )
-            return Array.isArray(result.versions) ? result : null
+            if (!Array.isArray(result.versions)) {
+                return null
+            }
+            pageCache.value = { ...pageCache.value, [key]: result }
+            return result
         } catch (error) {
             loadersFailure.value = toFailure(error)
             return null
@@ -161,6 +199,13 @@ export const useInstallService = defineStore('InstallService', () => {
         await killCli(id).catch(() => undefined)
     }
 
+    /** 刷新：丢掉加载器缓存，重取一份 */
+    function dropLoaderCache(): void {
+        availableCache.value = {}
+        warningsCache.value = {}
+        pageCache.value = {}
+    }
+
     function close(): void {
         busy.value = false
         events.value = []
@@ -186,6 +231,7 @@ export const useInstallService = defineStore('InstallService', () => {
         running,
         loadAvailableLoaders,
         queryLoader,
+        dropLoaderCache,
         start,
         cancel,
         close,
