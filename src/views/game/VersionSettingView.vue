@@ -7,11 +7,13 @@ import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
+import { ensureDirectory } from '@/api/files'
+import { openPath } from '@/api/system'
 import type { CliInstance } from '@/api/types'
 import { useCli } from '@/composables/useCli'
 import { useVersionService } from '@/stores/VersionService'
 import { lastPlayedLabel, loaderLabel, stateLabel, versionTypeLabel } from '@/utils/versionLabel'
-import { notifySuccess } from '@/utils/notify'
+import { notifyError, notifySuccess } from '@/utils/notify'
 
 interface CliInstanceInfo extends CliInstance {
     folder: string
@@ -55,6 +57,54 @@ function toFailure(error: unknown): Failure {
               retryable: error.retryable,
           }
         : { code: 'Unknown', message: String(error), detail: null, retryable: false }
+}
+
+interface FolderEntry {
+    key: string
+    label: string
+    path: string
+    /** 缺失时先建出来 */
+    create: boolean
+}
+
+/** 实例目录下的子目录：隔离布局，mods 与 saves 都在实例目录里 */
+function childOf(base: string, name: string): string {
+    const separator = base.includes('\\') ? '\\' : '/'
+    return `${base.replace(/[\\/]+$/, '')}${separator}${name}`
+}
+
+const folders = computed<FolderEntry[]>(() => {
+    const directory = info.value?.directory ?? ''
+    return [
+        { key: 'instance', label: '实例文件夹', path: directory, create: false },
+        {
+            key: 'mods',
+            label: 'mod 文件夹',
+            path: directory.length > 0 ? childOf(directory, 'mods') : '',
+            create: true,
+        },
+        {
+            key: 'saves',
+            label: '存档文件夹',
+            path: directory.length > 0 ? childOf(directory, 'saves') : '',
+            create: true,
+        },
+    ]
+})
+
+/** 用系统默认程序打开目录 */
+async function openFolder(folder: FolderEntry): Promise<void> {
+    if (folder.path.length === 0) {
+        return
+    }
+    try {
+        if (folder.create) {
+            await ensureDirectory(folder.path)
+        }
+        await openPath(folder.path)
+    } catch (error) {
+        notifyError(`打开文件夹失败 · ${String(error)}`)
+    }
 }
 
 /** 实例级寻址：id 可含点号，走 --folder / --instance */
@@ -262,12 +312,6 @@ watch(instanceId, load)
                         </span>
                     </div>
                     <div class="setting__row">
-                        <span class="setting__key">目录</span>
-                        <span class="setting__value setting__value--path">{{
-                            info.directory
-                        }}</span>
-                    </div>
-                    <div class="setting__row">
                         <span class="setting__key">Java</span>
                         <span class="setting__value">
                             要求 {{ info.java.required?.major ?? '未知' }}
@@ -278,6 +322,25 @@ watch(instanceId, load)
                         <span class="setting__value">{{ lastPlayedLabel(info.lastPlayed) }}</span>
                     </div>
                 </div>
+            </CollapsibleGroup>
+
+            <CollapsibleGroup label="文件夹" default-open>
+                <div class="setting__rows">
+                    <div v-for="folder in folders" :key="folder.key" class="setting__row">
+                        <span class="setting__key">{{ folder.label }}</span>
+                        <span class="setting__value setting__value--path">{{
+                            folder.path || '未知'
+                        }}</span>
+                        <GroupButton
+                            variant="ghost"
+                            :disabled="busy || folder.path.length === 0"
+                            @click="openFolder(folder)"
+                        >
+                            打开
+                        </GroupButton>
+                    </div>
+                </div>
+                <p class="setting__note">mod 与存档文件夹缺失时点击会先建出来</p>
             </CollapsibleGroup>
 
             <CollapsibleGroup label="内存" default-open>

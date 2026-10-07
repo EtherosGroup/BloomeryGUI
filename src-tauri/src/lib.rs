@@ -26,6 +26,7 @@ pub fn run() {
             background::remove_background,
             background::background_path,
             files::read_text_file,
+            files::ensure_directory,
             game::game_status,
             game::log_sizes,
             program::run_program,

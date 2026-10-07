@@ -15,3 +15,8 @@ export interface FileChunk {
 export async function readTextFile(path: string, offset: number): Promise<FileChunk> {
     return await invoke<FileChunk>('read_text_file', { path, offset })
 }
+
+/** 建目录，已存在不报错 */
+export async function ensureDirectory(path: string): Promise<void> {
+    await invoke('ensure_directory', { path })
+}

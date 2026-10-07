@@ -50,3 +50,28 @@ pub fn read_text_file(path: String, offset: u64) -> Result<FileChunk, String> {
         truncated: remaining > take,
     })
 }
+
+/// 建目录，已存在不报错
+#[tauri::command]
+pub fn ensure_directory(path: String) -> Result<(), String> {
+    fs::create_dir_all(&path).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_directory_creates_and_repeats() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("bloomery-dir-{}", std::process::id()));
+        path.push("mods");
+        let text = path.to_string_lossy().to_string();
+
+        ensure_directory(text.clone()).unwrap();
+        ensure_directory(text).unwrap();
+
+        assert!(path.is_dir());
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+}
