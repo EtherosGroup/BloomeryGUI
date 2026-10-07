@@ -65,6 +65,14 @@ const routes = [
         },
     },
     {
+        path: '/version/install',
+        name: 'version-install',
+        component: () => import('@/views/game/VersionInstallView.vue'),
+        meta: {
+            title: '安装新版本',
+        },
+    },
+    {
         path: '/version/:folderId/:instanceId/console',
         name: 'version-console',
         component: () => import('@/views/game/ConsoleView.vue'),

@@ -206,3 +206,64 @@ export interface CliLaunchResult {
     missing: string[]
     repair: unknown
 }
+
+/** view loader 概览的一行 */
+export interface CliLoaderOverview {
+    name: string
+    /** 取不到为 null */
+    latest: string | null
+    total: number
+}
+
+export type CliLoaderChannel = 'release' | 'beta' | 'alpha'
+
+/** view loader 列出的单个加载器版本 */
+export interface CliLoaderVersion {
+    version: string
+    /** forge 的清单按游戏版本分组，其余为 null */
+    gameVersion: string | null
+    channel: CliLoaderChannel
+}
+
+/** view loader <名字> --game <版本> 的结果，一页 20 条 */
+export interface CliLoaderPage {
+    v: number
+    loader: string
+    game: string
+    page: number
+    pages: number
+    perPage: number
+    total: number
+    versions: CliLoaderVersion[]
+}
+
+export interface CliDownloadFailure {
+    target: string
+    error: string
+}
+
+/** 下载四类通道各自的结果 */
+export interface CliDownloadReport {
+    downloaded: number
+    skipped: number
+    bytes: number
+    failures: CliDownloadFailure[]
+}
+
+/** install 的结果报告 */
+export interface CliInstallReport {
+    v: number
+    name: string
+    versionId: string
+    loader: { name: string; version: string } | null
+    /** 加载器要的基础版本是本来就有，还是这次顺带装的 */
+    base: 'none' | 'present' | 'installed'
+    clientJar: boolean
+    libraries: CliDownloadReport
+    natives: { jars: number; files: number; report: CliDownloadReport }
+    assets: { index: CliDownloadReport; objects: CliDownloadReport } | null
+    /** 走官方安装器时才有 */
+    official: unknown
+    timing: { downloadMs: number; finishMs: number }
+    warnings: string[]
+}
