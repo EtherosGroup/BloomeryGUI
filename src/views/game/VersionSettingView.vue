@@ -67,7 +67,7 @@ interface FolderEntry {
     key: string
     label: string
     path: string
-    /** 缺失时先建出来 */
+    /** 打开前先建目录 */
     create: boolean
 }
 
@@ -413,7 +413,7 @@ watch(instanceId, load)
                         </GroupButton>
                     </div>
                 </div>
-                <p class="setting__note">mod 与存档文件夹缺失时点击会先建出来</p>
+                <p class="setting__note">mod 与存档文件夹缺失时先建目录</p>
             </CollapsibleGroup>
 
             <CollapsibleGroup label="内存" default-open>

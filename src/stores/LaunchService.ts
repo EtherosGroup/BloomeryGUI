@@ -212,7 +212,7 @@ export const useLaunchService = defineStore(
             events.value = []
             pid.value = null
             logPath.value = ''
-            // 同一个实例再启动一次时不会走 reset，水位要在这里清掉
+            // 同实例再启动不走 reset，水位在这里清掉
             gameDirectory.value = ''
             logs.value = []
             windowEvidence.value = ''

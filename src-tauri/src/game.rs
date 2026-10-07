@@ -39,7 +39,7 @@ fn process_alive(pid: u32) -> Option<bool> {
     Some(state != 'Z' && state != 'X')
 }
 
-/// Windows：拿同步权限的句柄等到超时，即进程还在
+/// Windows：同步权限的句柄等到超时即为存活
 #[cfg(windows)]
 fn process_alive(pid: u32) -> Option<bool> {
     #[link(name = "kernel32")]
@@ -55,7 +55,7 @@ fn process_alive(pid: u32) -> Option<bool> {
 
     unsafe {
         let handle = OpenProcess(SYNCHRONIZE, 0, pid);
-        // 打不开视为不在了：游戏进程由本进程链拉起，权限够
+        // 打不开按已退出处理：游戏由本进程链拉起
         if handle == 0 {
             return Some(false);
         }
@@ -103,7 +103,7 @@ fn window_by_class(classes: &[&str], pid: Option<u32>) -> Option<String> {
                 return 1;
             }
             let context = &mut *(param as *mut Context);
-            // 认 pid：上一个实例、别的启动器开的同款窗口不算本次启动
+            // 认 pid 归属：其它实例、其它启动器的同款窗口不算本次启动
             if let Some(wanted) = context.pid {
                 let mut owner: u32 = 0;
                 GetWindowThreadProcessId(window, &mut owner);
@@ -157,7 +157,7 @@ fn window_by_class(classes: &[&str], pid: Option<u32>) -> Option<String> {
 fn marker_in_log(path: &str, since: u64) -> Option<String> {
     let mut file = fs::File::open(Path::new(path)).ok()?;
     let size = file.metadata().ok()?.len();
-    // 文件被截断或轮转时整份都算新内容，否则跳过上一次会话留下的部分
+    // 水位：截断或轮转后整份算新内容
     let start = if size < since { 0 } else { since };
     let from = start.max(size.saturating_sub(TAIL_BYTES));
 
@@ -335,7 +335,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
-    /// 截断点可能落在多字节字符中间，读取不能 panic
+    /// 截断点落在多字节字符中间时不 panic
     #[test]
     fn cut_inside_a_multibyte_character_is_safe() {
         let mut lines = "a".repeat(100);

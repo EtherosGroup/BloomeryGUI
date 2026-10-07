@@ -9,6 +9,7 @@ import {
     PhGameController,
     PhGear,
     PhUser,
+    PhPuzzlePiece,
 } from '@phosphor-icons/vue'
 import AccountMenu from '@/components/AccountMenu.vue'
 import type { CliAccount } from '@/api/account'
@@ -40,6 +41,15 @@ const groups: NavGroup[] = [
         items: [
             { label: '版本列表', to: '/version/list' },
             { label: '安装新版本', to: '/version/install' },
+        ],
+    },
+    {
+        id: 'mod',
+        label: '模组',
+        icon: PhPuzzlePiece,
+        items: [
+            { label: '安装模组', to: '/mod/install' },
+            { label: '批量安装', to: '/mod/batch-install' },
         ],
     },
     {
