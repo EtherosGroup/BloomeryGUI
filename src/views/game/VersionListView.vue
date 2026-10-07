@@ -102,6 +102,47 @@ async function setCurrent(folder: CliFolder): Promise<void> {
     notifySuccess(`当前文件夹 · ${folder.name}`)
 }
 
+const addOpen = ref(false)
+const addPath = ref('')
+const adding = ref(false)
+
+/** 打开添加文件夹弹窗 */
+function openAdd(): void {
+    addPath.value = ''
+    addOpen.value = true
+}
+
+/** 登记一个游戏文件夹：只写 setting.json，失败留在弹窗里改路径 */
+async function confirmAdd(): Promise<void> {
+    const path = addPath.value.trim()
+    if (path.length === 0) {
+        notifyError('路径为空')
+        return
+    }
+    adding.value = true
+    try {
+        const folder = await versionService.addFolder(path)
+        if (folder === null) {
+            const failure = versionService.foldersFailure
+            if (failure !== null) {
+                const detail = failure.detail === null ? '' : ` · ${failure.detail}`
+                notifyError(
+                    `${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`,
+                )
+            }
+            return
+        }
+        addOpen.value = false
+        opened.value = { ...opened.value, [folder.id]: true }
+        await versionService.loadList(folder.id)
+        // 名字取列表那一份，folder add 的返回里没有
+        const added = versionService.folders.find((item) => item.id === folder.id)
+        notifySuccess(`已添加文件夹 · ${added?.name ?? folder.id}`)
+    } finally {
+        adding.value = false
+    }
+}
+
 async function selectInstance(instance: CliInstance, folderId: string): Promise<void> {
     await versionService.select(instance.id, folderId)
 }
@@ -250,9 +291,22 @@ onMounted(async () => {
     <main class="versions">
         <header class="versions__head">
             <h1 class="versions__title">版本列表</h1>
-            <GroupButton variant="ghost" :disabled="versionService.foldersLoading" @click="refresh">
-                {{ versionService.foldersLoading ? '读取中' : '刷新' }}
-            </GroupButton>
+            <div class="versions__actions">
+                <GroupButton
+                    variant="ghost"
+                    :disabled="versionService.foldersLoading"
+                    @click="openAdd"
+                >
+                    添加文件夹
+                </GroupButton>
+                <GroupButton
+                    variant="ghost"
+                    :disabled="versionService.foldersLoading"
+                    @click="refresh"
+                >
+                    {{ versionService.foldersLoading ? '读取中' : '刷新' }}
+                </GroupButton>
+            </div>
         </header>
 
         <p v-if="versionService.foldersFailure" class="versions__failure">
@@ -435,6 +489,25 @@ onMounted(async () => {
             <pre class="versions__command">{{ dryRunText }}</pre>
         </PopupWindow>
 
+        <PopupWindow
+            v-model:open="addOpen"
+            title="添加文件夹"
+            context="登记一个含 versions/ 的游戏目录，只写 setting.json"
+            :buttons="[
+                { label: '取消' },
+                { label: '添加', onClick: confirmAdd, closeOnClick: false },
+            ]"
+        >
+            <div class="versions__confirm">
+                <GroupInput
+                    v-model="addPath"
+                    label="路径"
+                    placeholder="含 versions/ 的游戏目录"
+                    :disabled="adding"
+                />
+            </div>
+        </PopupWindow>
+
         <GameLaunching />
     </main>
 </template>
@@ -460,6 +533,12 @@ onMounted(async () => {
     margin: 0;
 
     font-size: var(--font-size-3xl);
+}
+
+.versions__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .versions__failure {

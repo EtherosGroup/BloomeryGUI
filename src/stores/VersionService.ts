@@ -12,6 +12,13 @@ export interface VersionFailure {
     retryable: boolean
 }
 
+/** folder add 的返回：只有 id / path / versionCount，没有列表行那些字段 */
+export interface AddedFolder {
+    id: string
+    path: string
+    versionCount: number
+}
+
 function toFailure(error: unknown): VersionFailure {
     return error instanceof BloomeryError
         ? {
@@ -181,6 +188,29 @@ export const useVersionService = defineStore('VersionService', () => {
         }
     }
 
+    /** 添加游戏文件夹：只写 setting.json，加完重列 */
+    async function addFolder(path: string): Promise<AddedFolder | null> {
+        const target = path.trim()
+        if (target.length === 0 || foldersLoading.value) {
+            return null
+        }
+        foldersLoading.value = true
+        foldersFailure.value = null
+        try {
+            const client = await useCli().client()
+            const folder = await client.run<AddedFolder>(['folder', 'add', target], {
+                progress: false,
+            })
+            await loadFolders()
+            return folder
+        } catch (error) {
+            foldersFailure.value = toFailure(error)
+            return null
+        } finally {
+            foldersLoading.value = false
+        }
+    }
+
     /** 启动实例：GUI 一律 --detach，不等游戏退出 */
     async function launch(
         instanceId: string,
@@ -237,6 +267,7 @@ export const useVersionService = defineStore('VersionService', () => {
         reloadAll,
         select,
         setCurrentFolder,
+        addFolder,
         launch,
     }
 })
