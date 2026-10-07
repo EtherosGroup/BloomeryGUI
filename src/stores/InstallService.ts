@@ -2,14 +2,11 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { killCli } from '@/api/transport.tauri'
-import type {
-    CliGameLoader,
-    CliGameLoaderPage,
-    CliInstallReport,
-    CliLoaderPage,
-    CliProgressEvent,
-} from '@/api/types'
+import type { CliGameLoader, CliInstallReport, CliLoaderPage, CliProgressEvent } from '@/api/types'
 import { useCli } from '@/composables/useCli'
+
+/** 四家加载器，顺序与 CLI 一致 */
+export const LOADER_NAMES = ['fabric', 'forge', 'neoforge', 'quilt'] as const
 
 export interface InstallFailure {
     code: string
@@ -52,10 +49,12 @@ export const useInstallService = defineStore('InstallService', () => {
     const cancelled = ref(false)
     const target = ref<InstallTarget | null>(null)
 
-    /** 选定游戏版本上各加载器的规模，来自 view game */
+    /** 选定游戏版本上各加载器的规模，来自 view loader --game */
     const availableLoaders = ref<CliGameLoader[]>([])
     const availableWarnings = ref<string[]>([])
     const availableLoading = ref(false)
+    /** 还没回的那几家，界面按这个出骨架 */
+    const pendingLoaders = ref<string[]>([])
     const loadersFailure = ref<InstallFailure | null>(null)
 
     /** 已取过的结果：进程内缓存，活到应用重启；刷新走 force */
@@ -69,7 +68,36 @@ export const useInstallService = defineStore('InstallService', () => {
     const latest = computed(() => events.value[events.value.length - 1] ?? null)
     const running = computed(() => busy.value)
 
-    /** 某个游戏版本上四种加载器各有多少版本，没有的给 0 */
+    /** 单家查询：失败交给调用方处理，不写页面级 failure */
+    async function fetchLoaderPage(
+        loader: string,
+        game: string,
+        page: number,
+        force: boolean,
+    ): Promise<CliLoaderPage> {
+        const key = `${loader}/${game}/${page}`
+        const cached = pageCache.value[key]
+        if (!force && cached !== undefined) {
+            return cached
+        }
+        const client = await useCli().client()
+        const result = await client.run<CliLoaderPage>(
+            ['view', 'loader', loader, '--game', game, '--page', String(page)],
+            { progress: false },
+        )
+        if (!Array.isArray(result.versions)) {
+            throw new Error('返回内容不是版本列表')
+        }
+        pageCache.value = { ...pageCache.value, [key]: result }
+        return result
+    }
+
+    /**
+     * 某个游戏版本上四种加载器各有多少版本
+     *
+     * 四家并行取：CLI 的 view game 是串行打四家，二十秒起步；各自回来就各自出行
+     * 不支持这个游戏版本的那家给 total 0，不列
+     */
     async function loadAvailableLoaders(game: string, force = false): Promise<void> {
         const cached = availableCache.value[game]
         if (!force && cached !== undefined) {
@@ -81,32 +109,73 @@ export const useInstallService = defineStore('InstallService', () => {
         const seq = ++loadersSeq
         availableLoading.value = true
         loadersFailure.value = null
+        availableLoaders.value = []
+        availableWarnings.value = []
+        pendingLoaders.value = [...LOADER_NAMES]
+
+        const rows = new Map<string, CliGameLoader>()
+        const warnings: string[] = []
+        let firstError: unknown = null
+
+        // 固定顺序落位，谁先回都长在该在的位置
+        const settle = (): void => {
+            if (seq !== loadersSeq) {
+                return
+            }
+            availableLoaders.value = LOADER_NAMES.map((name) => rows.get(name)).filter(
+                (row): row is CliGameLoader => row !== undefined,
+            )
+            availableWarnings.value = [...warnings]
+        }
+
         try {
-            const client = await useCli().client()
-            const result = await client.run<CliGameLoaderPage>(['view', 'game', game], {
-                progress: false,
-            })
-            const rows = Array.isArray(result.loaders) ? result.loaders : []
-            const warnings = Array.isArray(result.warnings) ? result.warnings : []
-            availableCache.value = { ...availableCache.value, [game]: rows }
-            warningsCache.value = { ...warningsCache.value, [game]: warnings }
-            if (seq !== loadersSeq) {
-                return
-            }
-            availableLoaders.value = rows
-            availableWarnings.value = warnings
-        } catch (error) {
-            if (seq !== loadersSeq) {
-                return
-            }
-            availableLoaders.value = []
-            availableWarnings.value = []
-            loadersFailure.value = toFailure(error)
+            await Promise.all(
+                LOADER_NAMES.map(async (name) => {
+                    try {
+                        const page = await fetchLoaderPage(name, game, 1, force)
+                        if (page.total > 0) {
+                            rows.set(name, {
+                                loader: name,
+                                latest: page.versions[0]?.version ?? null,
+                                total: page.total,
+                            })
+                        }
+                    } catch (error) {
+                        firstError ??= error
+                        warnings.push(
+                            `${name} 取不到：${error instanceof Error ? error.message : String(error)}`,
+                        )
+                    } finally {
+                        if (seq === loadersSeq) {
+                            pendingLoaders.value = pendingLoaders.value.filter(
+                                (item) => item !== name,
+                            )
+                            settle()
+                        }
+                    }
+                }),
+            )
         } finally {
             if (seq === loadersSeq) {
                 availableLoading.value = false
+                pendingLoaders.value = []
             }
         }
+
+        if (seq !== loadersSeq) {
+            return
+        }
+        // 四家全挂才算页面级失败，单家失败只记警告
+        if (rows.size === 0 && firstError !== null && warnings.length === LOADER_NAMES.length) {
+            loadersFailure.value = toFailure(firstError)
+        }
+        availableCache.value = {
+            ...availableCache.value,
+            [game]: LOADER_NAMES.map((name) => rows.get(name)).filter(
+                (row): row is CliGameLoader => row !== undefined,
+            ),
+        }
+        warningsCache.value = { ...warningsCache.value, [game]: [...warnings] }
     }
 
     /** 某个加载器在某个游戏版本上可用的版本，每页 20 条 */
@@ -124,16 +193,7 @@ export const useInstallService = defineStore('InstallService', () => {
 
         loadersFailure.value = null
         try {
-            const client = await useCli().client()
-            const result = await client.run<CliLoaderPage>(
-                ['view', 'loader', loader, '--game', game, '--page', String(page)],
-                { progress: false },
-            )
-            if (!Array.isArray(result.versions)) {
-                return null
-            }
-            pageCache.value = { ...pageCache.value, [key]: result }
-            return result
+            return await fetchLoaderPage(loader, game, page, force)
         } catch (error) {
             loadersFailure.value = toFailure(error)
             return null
@@ -226,6 +286,7 @@ export const useInstallService = defineStore('InstallService', () => {
         availableLoaders,
         availableWarnings,
         availableLoading,
+        pendingLoaders,
         loadersFailure,
         latest,
         running,

@@ -207,22 +207,13 @@ export interface CliLaunchResult {
     repair: unknown
 }
 
-/** view game <版本> 里某个加载器在那一个游戏版本上的规模 */
+/** 某个加载器在一个游戏版本上的规模，来自 view loader --game */
 export interface CliGameLoader {
     loader: string
     /** 取不到为 null */
     latest: string | null
     /** 0 表示这个游戏版本上没有 */
     total: number
-}
-
-/** view game <版本> 的结果，只要每个加载器的规模，不要那页合并版本 */
-export interface CliGameLoaderPage {
-    v: number
-    game: string
-    loaders: CliGameLoader[]
-    /** 某一家取不到时的说明 */
-    warnings: string[]
 }
 
 export type CliLoaderChannel = 'release' | 'beta' | 'alpha'
