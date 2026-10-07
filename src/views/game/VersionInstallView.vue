@@ -590,10 +590,7 @@ function reportFailure(): void {
                 </div>
 
                 <p class="install__note">
-                    {{ game }} 上可装 {{ loaderRows.length }} 种加载器 · 没有这个版本记录的不列
-                </p>
-                <p v-if="install.pendingLoaders.length > 0" class="install__note">
-                    四家并行取，先回的先出
+                    在 {{ game }} 上有 {{ loaderRows.length }} 种可用的加载器
                 </p>
                 <p
                     v-for="warning in install.availableWarnings"
