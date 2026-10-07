@@ -390,7 +390,7 @@ function reportFailure(): void {
         </CollapsibleGroup>
 
         <CollapsibleGroup label="加载器" default-open>
-            <p v-if="game.length === 0" class="install__note">先选游戏版本</p>
+            <p v-if="game.length === 0" class="install__note">请选择一个游戏版本</p>
             <p v-else-if="install.availableLoading" class="install__note">读取中</p>
             <template v-else>
                 <div class="install__loader">
@@ -404,7 +404,7 @@ function reportFailure(): void {
                         >
                             原版
                         </button>
-                        <span class="install__loader-meta">不装加载器</span>
+                        <span class="install__loader-meta">不安装加载器</span>
                     </div>
                 </div>
 
@@ -486,7 +486,7 @@ function reportFailure(): void {
                 </div>
 
                 <p class="install__note">
-                    {{ game }} 上可装 {{ loaderRows.length }} 种加载器 · 没有这个版本记录的不列
+                    {{ game }} 上有 {{ loaderRows.length }} 种可用的加载器加载器
                 </p>
                 <p
                     v-for="warning in install.availableWarnings"
@@ -508,7 +508,7 @@ function reportFailure(): void {
             <GroupInput
                 v-model="displayName"
                 label="显示名"
-                placeholder="留空由 CLI 推导"
+                placeholder="留空由Bloomery自动处理"
                 :disabled="install.busy"
             />
             <p class="install__note">{{ commandPreview }}</p>
@@ -576,6 +576,11 @@ function reportFailure(): void {
 
     max-width: 52rem;
     padding: 1.5rem;
+
+    // 可点元素的底与悬停：与分组内容区差 8% / 16%，两套主题下都看得出来
+    --clickable-bg: color-mix(in srgb, var(--text-color) 8%, var(--group-content-bg));
+    --clickable-bg-hover: color-mix(in srgb, var(--text-color) 16%, var(--group-content-bg));
+    --clickable-bg-active: color-mix(in srgb, var(--text-color) 26%, var(--group-content-bg));
 }
 
 .install__head {
@@ -652,13 +657,28 @@ function reportFailure(): void {
     font-size: var(--font-size-sm);
     text-align: left;
 
-    background-color: transparent;
+    background-color: var(--clickable-bg);
     border: 1px solid transparent;
     border-radius: var(--border-radius);
     cursor: pointer;
 
+    transition:
+        background-color var(--transition-duration) var(--transition-ease),
+        border-color var(--transition-duration) var(--transition-ease),
+        color var(--transition-duration) var(--transition-ease);
+
     &:hover:not(:disabled) {
-        background-color: var(--button-bg-color);
+        background-color: var(--clickable-bg-hover);
+        border-color: var(--text-color-dark);
+    }
+
+    &:active:not(:disabled) {
+        background-color: var(--clickable-bg-active);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--text-color);
+        outline-offset: -2px;
     }
 
     &:disabled {
@@ -666,8 +686,16 @@ function reportFailure(): void {
     }
 }
 
+/* 选中：反色，一眼看出选的是哪一条 */
 .install__version--on {
-    border-color: var(--text-color);
+    color: var(--text-color-opposite);
+    background-color: var(--bg-opposite);
+    border-color: var(--bg-opposite);
+
+    .install__version-time {
+        color: var(--text-color-opposite);
+        opacity: 0.75;
+    }
 }
 
 .install__version-id {
@@ -686,9 +714,10 @@ function reportFailure(): void {
 .install__tag {
     padding: 0 0.4rem;
 
+    color: var(--text-color);
     font-size: var(--font-size-xs);
 
-    background-color: var(--button-bg-color);
+    background-color: var(--clickable-bg-hover);
     border-radius: calc(var(--border-radius) / 2);
 }
 
@@ -715,13 +744,28 @@ function reportFailure(): void {
     font-size: var(--font-size-sm);
     font-weight: 600;
 
-    background-color: var(--button-bg-color);
+    background-color: var(--clickable-bg);
     border: 1px solid transparent;
     border-radius: calc(var(--border-radius) / 2);
     cursor: pointer;
 
+    transition:
+        background-color var(--transition-duration) var(--transition-ease),
+        border-color var(--transition-duration) var(--transition-ease),
+        color var(--transition-duration) var(--transition-ease);
+
     &:hover:not(:disabled) {
+        background-color: var(--clickable-bg-hover);
         border-color: var(--text-color-dark);
+    }
+
+    &:active:not(:disabled) {
+        background-color: var(--clickable-bg-active);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--text-color);
+        outline-offset: 1px;
     }
 
     &:disabled {
@@ -768,13 +812,28 @@ function reportFailure(): void {
     font-family: ui-monospace, monospace;
     font-size: var(--font-size-xs);
 
-    background-color: var(--button-bg-color);
+    background-color: var(--clickable-bg);
     border: 1px solid transparent;
     border-radius: calc(var(--border-radius) / 2);
     cursor: pointer;
 
+    transition:
+        background-color var(--transition-duration) var(--transition-ease),
+        border-color var(--transition-duration) var(--transition-ease),
+        color var(--transition-duration) var(--transition-ease);
+
     &:hover:not(:disabled) {
+        background-color: var(--clickable-bg-hover);
         border-color: var(--text-color-dark);
+    }
+
+    &:active:not(:disabled) {
+        background-color: var(--clickable-bg-active);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--text-color);
+        outline-offset: 1px;
     }
 
     &:disabled {

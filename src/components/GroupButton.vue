@@ -74,10 +74,18 @@ withDefaults(
     &--ghost {
         color: var(--text-color);
         background-color: var(--button-bg-color);
+        // 暗色下底色与分组内容区同为 #333，靠这圈描边区分
+        border-color: color-mix(in srgb, var(--text-color) 16%, transparent);
 
         &:hover {
             background-color: var(--button-bg-color-dark);
+            border-color: color-mix(in srgb, var(--text-color) 34%, transparent);
             opacity: 1;
+        }
+
+        &:active {
+            opacity: 1;
+            background-color: color-mix(in srgb, var(--text-color) 26%, var(--button-bg-color));
         }
     }
 

@@ -53,7 +53,8 @@ const model = defineModel<boolean>({ default: false })
     margin: 0;
 
     appearance: none;
-    background-color: var(--button-bg-color-dark);
+    // 暗色下轨道与分组内容区接近同色，按文字色提一档
+    background-color: color-mix(in srgb, var(--text-color) 22%, var(--button-bg-color-dark));
     border-radius: 999px;
     cursor: inherit;
 
