@@ -14,6 +14,7 @@
         "version": "node scripts/sync-version.mjs",
         "check:errors": "node --experimental-strip-types scripts/check-error-envelopes.mjs",
         "check:icons": "node scripts/check-bundle-icons.mjs",
+        "check:launch": "node --experimental-strip-types scripts/check-launch-phase.mjs",
         "check:spawns": "node scripts/check-spawns.mjs"
     },
     "dependencies": {

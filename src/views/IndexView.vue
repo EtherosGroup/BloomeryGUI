@@ -7,6 +7,7 @@ import GroupButton from '@/components/GroupButton.vue'
 import GroupLabel from '@/components/GroupLabel.vue'
 import GroupSelect from '@/components/GroupSelect.vue'
 import GameLaunching from '@/components/GameLaunching.vue'
+import Spinner from '@/components/Spinner.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
 import { useAccountService } from '@/stores/AccountService'
@@ -203,10 +204,20 @@ onMounted(async () => {
 
         <div class="quick-start">
             <div class="quick-start__main">
-                <GroupButton block @click="requestLaunch">启动游戏</GroupButton>
+                <GroupButton block :disabled="launchService.busy" @click="requestLaunch">
+                    {{ launchService.preparing ? '准备中' : '启动游戏' }}
+                </GroupButton>
                 <GroupLabel class="quick-start__instance">
                     {{ versionService.selectedInstance ?? '未选择实例' }}
                 </GroupLabel>
+                <!-- 准备阶段：dry-run 期间无遮罩 -->
+                <p v-if="launchService.preparing" class="quick-start__busy">
+                    <Spinner size="0.85rem" label="正在准备启动" />
+                    <span
+                        >{{ launchService.phaseHint || '正在读取启动计划' }} · 已用
+                        {{ launchService.elapsedSeconds }} 秒</span
+                    >
+                </p>
             </div>
             <GroupSelect
                 v-model="choice"
@@ -288,5 +299,17 @@ onMounted(async () => {
 
 .quick-start__instance {
     text-align: center;
+}
+
+.quick-start__busy {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
 }
 </style>

@@ -28,6 +28,7 @@ const ERROR_LABEL: Record<string, string> = {
     AccountExpired: '账户凭据需要刷新',
     MicrosoftClientIdMissing: '缺少微软应用 id',
     MicrosoftLoginFailed: '微软登录失败',
+    MicrosoftRefreshFailed: '微软凭据续期失败',
     MicrosoftNotOwned: '这个微软账户没有 Minecraft: Java Edition',
     ModNotFound: '没找到这个 MOD',
     ModUnsupported: '这个实例装不了这个 MOD',

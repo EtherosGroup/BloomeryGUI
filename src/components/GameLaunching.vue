@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
-import { PhArrowRight, PhCheck, PhWarning } from '@phosphor-icons/vue'
+import { PhCheck, PhWarning } from '@phosphor-icons/vue'
 import GroupButton from '@/components/GroupButton.vue'
+import Spinner from '@/components/Spinner.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { accountTypeLabel } from '@/utils/accountAvatar'
 import { diagInfo } from '@/api/diagnostics'
@@ -113,10 +114,10 @@ onBeforeUnmount(() => {
                     >
                         <span class="launching__mark" aria-hidden="true">
                             <PhCheck v-if="step.state === 'done'" :size="14" weight="bold" />
-                            <PhArrowRight
+                            <Spinner
                                 v-else-if="step.state === 'current'"
-                                :size="14"
-                                weight="bold"
+                                size="0.85rem"
+                                :label="`${step.label}进行中`"
                             />
                             <PhWarning
                                 v-else-if="step.state === 'failed'"
@@ -128,6 +129,13 @@ onBeforeUnmount(() => {
                         <span class="launching__label">{{ step.label }}</span>
                     </li>
                 </ul>
+
+                <!-- 续期期间 CLI 无进度事件，秒针是唯一的活动反馈 -->
+                <p v-if="launch.busy" class="launching__busy">
+                    <Spinner size="0.85rem" label="正在启动" />
+                    <span>已用 {{ launch.elapsedSeconds }} 秒</span>
+                </p>
+                <p v-if="launch.phaseHint" class="launching__hint">{{ launch.phaseHint }}</p>
 
                 <p v-if="progressText" class="launching__progress">{{ progressText }}</p>
 
@@ -303,6 +311,27 @@ onBeforeUnmount(() => {
 
     color: var(--text-color-dark);
     font-size: var(--font-size-xs);
+}
+
+/* 秒针与阶段说明：续期期间无进度事件 */
+.launching__busy {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+}
+
+.launching__hint {
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    word-break: break-all;
 }
 
 .launching__failure {

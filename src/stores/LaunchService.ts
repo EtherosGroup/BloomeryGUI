@@ -6,19 +6,22 @@ import { appendDiag } from '@/api/diagnostics'
 import { gameStatus, logSizes, type GameLog } from '@/api/game'
 import type { CliLaunchResult, CliProgressEvent } from '@/api/types'
 import { useCli } from '@/composables/useCli'
+import { useAccountService } from '@/stores/AccountService'
+import {
+    credentialsExpired,
+    launchPhaseHint,
+    launchSteps,
+    planNeedsRefresh,
+    type LaunchStep,
+    type LaunchStepState,
+} from '@/utils/launchPhase'
 
-export type LaunchStepState = 'pending' | 'current' | 'done' | 'failed'
+export type { LaunchStep, LaunchStepState } from '@/utils/launchPhase'
 
 /** 诊断行：带时间戳写入应用数据目录的 diag.log，写失败不影响主流程 */
 function trace(...parts: unknown[]): void {
     const line = `[${new Date().toISOString()}] ${parts.map((part) => String(part)).join(' ')}`
     void appendDiag([line])
-}
-
-export interface LaunchStep {
-    key: string
-    label: string
-    state: LaunchStepState
 }
 
 export interface LaunchFailure {
@@ -62,7 +65,74 @@ export const useLaunchService = defineStore(
         /** 最近一条进度：阶段名与已完成数 */
         const latest = computed(() => events.value[events.value.length - 1] ?? null)
 
+        /** 本次启动微软凭据待续期；续期期间 CLI 无进度事件 */
+        const credentialsPending = ref(false)
+
+        /** 当前正在做的那一步，没有则为 null */
+        const currentStep = computed(
+            () => steps.value.find((step) => step.state === 'current') ?? null,
+        )
+
+        /** 准备阶段：dry-run 期间，遮罩还没出来，调用方自己给按钮上的反馈 */
+        const preparing = computed(() => busy.value && !active.value)
+
+        /**
+         * 已用秒数
+         *
+         * 续期期间 CLI 无输出，秒针是界面唯一的活动反馈
+         */
+        const elapsedSeconds = computed(() => {
+            void clockTick.value
+            if (startedAt.value === 0) {
+                return 0
+            }
+            return Math.max(0, Math.round((Date.now() - startedAt.value) / 1000))
+        })
+
+        /** 当前步骤的说明 */
+        const phaseHint = computed(() => launchPhaseHint(currentStep.value?.key ?? null))
+
+        /** 起始时刻与秒针 */
+        const startedAt = ref(0)
+        const clockTick = ref(0)
+        let clockTimer: number | undefined
+
+        function stopClock(): void {
+            if (clockTimer !== undefined) {
+                window.clearInterval(clockTimer)
+                clockTimer = undefined
+            }
+        }
+
+        function startClock(): void {
+            stopClock()
+            startedAt.value = Date.now()
+            clockTick.value = 0
+            clockTimer = window.setInterval(() => {
+                clockTick.value += 1
+            }, 1000)
+        }
+
+        /** 手上这份计划是不是这次要启动的实例的：计划里的 version 就是实例 id */
+        function planOf(target: string): CliLaunchResult | null {
+            const current = plan.value
+            return current !== null && current.version === target ? current : null
+        }
+
+        /**
+         * 这次真启动是否先续期
+         *
+         * 优先取计划里的 needsRefresh：1.13.1 起 dry-run 不再续期，计划反映的就是真启动前的状态
+         * 没走 prepare、或引擎没有这个字段时，退回账户列表的状态判断
+         */
+        function credentialsStale(target: string): boolean {
+            const fromPlan = planNeedsRefresh(planOf(target)?.account)
+            return fromPlan ?? credentialsExpired(useAccountService().selected)
+        }
+
         function reset(target: string, scope: string): void {
+            // 先按当前计划判断，随后清掉计划
+            refreshSteps(target)
             instance.value = target
             folder.value = scope
             plan.value = null
@@ -75,12 +145,17 @@ export const useLaunchService = defineStore(
             events.value = []
             failure.value = null
             cancelled.value = false
-            steps.value = [
-                { key: 'verify', label: '检查文件完整性', state: 'pending' },
-                { key: 'repair', label: '补全文件', state: 'pending' },
-                { key: 'spawn', label: '拉起游戏进程', state: 'pending' },
-                { key: 'window', label: '等待游戏窗口出现', state: 'pending' },
-            ]
+        }
+
+        /**
+         * 重算凭据那一步
+         *
+         * 同实例连续启动不重建步骤，凭据续期后这一步不再出现，
+         * 结论按当前计划重取
+         */
+        function refreshSteps(target: string): void {
+            credentialsPending.value = credentialsStale(target)
+            steps.value = launchSteps(credentialsPending.value)
         }
 
         function setStep(key: string, state: LaunchStepState): void {
@@ -160,6 +235,7 @@ export const useLaunchService = defineStore(
                     if (status.windowReady) {
                         setStep('window', 'done')
                         stopPolling()
+                        stopClock()
                         trace('窗口就绪', status.evidence)
                         return
                     }
@@ -176,12 +252,17 @@ export const useLaunchService = defineStore(
 
         /** 读启动计划，只算不启动 */
         async function prepare(target: string, scope: string): Promise<CliLaunchResult | null> {
-            reset(target, scope)
+            // dry-run 只算不联网，重复点会起多个 CLI 进程
+            if (busy.value) {
+                return null
+            }
+            busy.value = true
             // 只是读启动计划，进度面板等真启动再出现
             active.value = false
-            steps.value = []
-            busy.value = true
+            startClock()
             try {
+                reset(target, scope)
+                setStep('verify', 'current')
                 const client = await useCli().client()
                 const args = ['launch', target, '--dry-run']
                 if (scope.length > 0) {
@@ -191,22 +272,26 @@ export const useLaunchService = defineStore(
 
                 const result = await client.run<CliLaunchResult>(args, { progress: false })
                 plan.value = result
+                // 计划里带着 needsRefresh，真启动会不会先续期以它为准
+                refreshSteps(target)
                 return result
             } catch (error) {
                 failure.value = toFailure(error)
                 return null
             } finally {
                 busy.value = false
+                stopClock()
             }
         }
 
         /** 真启动：一律 --detach，顺带收进度事件 */
         async function start(target: string, scope: string): Promise<boolean> {
-            if (steps.value.length === 0 || instance.value !== target) {
-                reset(target, scope)
+            if (busy.value) {
+                return false
             }
             active.value = true
             busy.value = true
+            startClock()
             failure.value = null
             cancelled.value = false
             events.value = []
@@ -216,8 +301,15 @@ export const useLaunchService = defineStore(
             gameDirectory.value = ''
             logs.value = []
             windowEvidence.value = ''
+            // 正常流程里刚跑过 dry-run，计划里的 needsRefresh 就是这次的判据
+            if (steps.value.length === 0 || instance.value !== target) {
+                reset(target, scope)
+            } else {
+                refreshSteps(target)
+            }
             setStep('verify', 'done')
-            setStep('repair', 'current')
+            // 凭据过期时先续期，该步无进度事件，单独列一步
+            setStep(credentialsPending.value ? 'credentials' : 'repair', 'current')
 
             const id = `launch-${target}-${Date.now()}`
             callId.value = id
@@ -240,6 +332,7 @@ export const useLaunchService = defineStore(
                 gameDirectory.value = result.directory ?? ''
                 logs.value = await collectLogs(result)
                 trace('launch 返回 pid=', result.pid ?? null, 'log=', result.log ?? '(无)')
+                setStep('credentials', 'done')
                 setStep('repair', 'done')
                 setStep('spawn', 'done')
                 setStep('window', 'current')
@@ -247,7 +340,9 @@ export const useLaunchService = defineStore(
                 return true
             } catch (error) {
                 const state = cancelled.value ? 'pending' : 'failed'
+                setStep('credentials', state)
                 setStep('repair', state)
+                stopClock()
                 if (!cancelled.value) {
                     failure.value = toFailure(error)
                     trace(
@@ -271,6 +366,7 @@ export const useLaunchService = defineStore(
         /** 取消：杀掉正在干活的 CLI 进程 */
         async function cancel(): Promise<void> {
             stopPolling()
+            stopClock()
             const id = callId.value
             if (id.length === 0) {
                 return
@@ -281,6 +377,8 @@ export const useLaunchService = defineStore(
 
         function close(): void {
             stopPolling()
+            stopClock()
+            startedAt.value = 0
             active.value = false
             steps.value = []
             events.value = []
@@ -306,6 +404,11 @@ export const useLaunchService = defineStore(
             active,
             windowEvidence,
             steps,
+            credentialsPending,
+            currentStep,
+            preparing,
+            elapsedSeconds,
+            phaseHint,
             running,
             latest,
             prepare,

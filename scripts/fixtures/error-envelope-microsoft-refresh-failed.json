@@ -1,0 +1,11 @@
+{
+    "v": 1,
+    "error": {
+        "code": "MicrosoftRefreshFailed",
+        "message": "微软凭据续期失败",
+        "detail": "网络请求失败",
+        "exit": 1,
+        "retryable": true,
+        "context": {}
+    }
+}

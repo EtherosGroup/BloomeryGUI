@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { PhGear, PhPlay } from '@phosphor-icons/vue'
 import CollapsibleGroup from '@/components/CollapsibleGroup.vue'
 import GameLaunching from '@/components/GameLaunching.vue'
+import Spinner from '@/components/Spinner.vue'
 import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
@@ -318,6 +319,15 @@ onMounted(async () => {
             </div>
         </header>
 
+        <!-- 准备阶段：dry-run 期间无遮罩 -->
+        <p v-if="launchService.preparing" class="versions__busy">
+            <Spinner size="0.85rem" label="正在准备启动" />
+            <span>
+                {{ launchService.phaseHint || '正在读取启动计划' }} · 已用
+                {{ launchService.elapsedSeconds }} 秒
+            </span>
+        </p>
+
         <p v-if="versionService.foldersFailure" class="versions__failure">
             <span class="versions__failure-code">
                 {{
@@ -575,6 +585,18 @@ onMounted(async () => {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+/* 准备阶段的提示；此时无遮罩 */
+.versions__busy {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
 }
 
 .versions__failure {

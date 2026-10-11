@@ -6,6 +6,8 @@
  *                                        然后 install 1.20.6 --loader fabric，抓 stdout
  *   error-envelope-usage-error.json      真实 CLI 产出：version show，抓 stdout
  *   error-envelope-unknown-code.json     手工构造，形状同真实信封，用于验证未知码回落
+ *   error-envelope-microsoft-refresh-failed.json  真实 CLI 1.13.2 报文（续期时网络故障），
+ *                                              钉住新码的文案与「可重试」
  *
  * 夹具目录可用 FX_DIR 覆盖，便于做反向验证
  */
@@ -34,6 +36,12 @@ const cases = [
         code: 'UsageError',
         retryable: false,
         expect: '参数不合法',
+    },
+    {
+        file: 'error-envelope-microsoft-refresh-failed.json',
+        code: 'MicrosoftRefreshFailed',
+        retryable: true,
+        expect: '微软凭据续期失败 · 可重试',
     },
     {
         file: 'error-envelope-unknown-code.json',
