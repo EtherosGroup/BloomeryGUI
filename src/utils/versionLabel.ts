@@ -32,12 +32,13 @@ export function gameVersionLabel(version: string | null): string {
     return version === null || version.length === 0 ? '未知' : version
 }
 
-/** 加载器显示名，原版返回「原版」 */
+/** 加载器显示名；CLI 把原版实例报成 type 为 vanilla，也要显示成「原版」 */
 export function loaderLabel(instance: CliInstance): string {
-    if (!instance.loader) {
+    const loader = instance.loader
+    if (!loader || loader.type === 'vanilla') {
         return '原版'
     }
-    return `${instance.loader.type} ${instance.loader.version}`
+    return loader.version === null ? loader.type : `${loader.type} ${loader.version}`
 }
 
 /** RFC3339 转本地时间，空值与非法值返回「未启动」 */

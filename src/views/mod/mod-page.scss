@@ -1,0 +1,252 @@
+.mod {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+
+    max-width: 52rem;
+    padding: 1.5rem;
+
+    // 可点元素的底与悬停：与分组内容区差 8% / 16%，两套主题下都看得出来
+    --clickable-bg: color-mix(in srgb, var(--text-color) 8%, var(--group-content-bg));
+    --clickable-bg-hover: color-mix(in srgb, var(--text-color) 16%, var(--group-content-bg));
+    --clickable-bg-active: color-mix(in srgb, var(--text-color) 26%, var(--group-content-bg));
+}
+
+.mod__head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.mod__title {
+    flex: 1;
+    margin: 0;
+
+    font-size: var(--font-size-3xl);
+}
+
+.mod__failure {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+
+    font-size: var(--font-size-sm);
+
+    background-color: color-mix(in srgb, #c62828 18%, transparent);
+    border: 1px solid color-mix(in srgb, #c62828 45%, transparent);
+    border-radius: var(--border-radius);
+}
+
+.mod__failure-code {
+    font-weight: 600;
+}
+
+.mod__failure-detail {
+    color: var(--text-color-dark);
+    word-break: break-all;
+}
+
+.mod__note {
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    word-break: break-all;
+}
+
+.mod__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+
+    margin-top: 0.25rem;
+}
+
+.mod__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+
+    max-height: 22rem;
+    margin: 0;
+    padding: 0;
+
+    overflow: auto;
+
+    list-style: none;
+}
+
+.mod__row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+
+    color: var(--text-color);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-align: left;
+
+    background-color: var(--clickable-bg);
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+
+    transition:
+        background-color var(--transition-duration) var(--transition-ease),
+        border-color var(--transition-duration) var(--transition-ease),
+        color var(--transition-duration) var(--transition-ease);
+
+    &:hover:not(:disabled) {
+        background-color: var(--clickable-bg-hover);
+        border-color: var(--text-color-dark);
+    }
+
+    &:active:not(:disabled) {
+        background-color: var(--clickable-bg-active);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--text-color);
+        outline-offset: 1px;
+    }
+
+    &:disabled {
+        cursor: default;
+        opacity: 0.6;
+    }
+}
+
+.mod__row--on {
+    background-color: var(--clickable-bg-active);
+    border-color: var(--text-color);
+}
+
+.mod__wait {
+    cursor: default;
+}
+
+.mod__row-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.mod__row-title {
+    font-weight: 600;
+}
+
+.mod__row-slug,
+.mod__row-meta {
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+}
+
+.mod__row-desc {
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    word-break: break-all;
+}
+
+.mod__row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.mod__tag {
+    padding: 0.05rem 0.4rem;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    background-color: var(--clickable-bg-hover);
+    border-radius: calc(var(--border-radius) / 2);
+}
+
+.mod__lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+
+    margin: 0;
+    padding: 0;
+
+    list-style: none;
+}
+
+.mod__lane {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    font-size: var(--font-size-xs);
+}
+
+.mod__lane-label {
+    min-width: 5rem;
+}
+
+.mod__lane-track {
+    flex: 1;
+    height: 0.4rem;
+
+    overflow: hidden;
+
+    background-color: var(--clickable-bg);
+    border-radius: calc(var(--border-radius) / 2);
+}
+
+.mod__lane-bar {
+    display: block;
+    height: 100%;
+
+    background-color: var(--text-color);
+
+    transition: width var(--transition-duration) var(--transition-ease);
+}
+
+.mod__lane-count {
+    min-width: 7rem;
+    color: var(--text-color-dark);
+    text-align: right;
+}
+
+.mod__result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.mod__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.mod__row-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+
+    font-size: var(--font-size-xs);
+}
+
+.mod__key {
+    min-width: 3rem;
+    color: var(--text-color-dark);
+}
+
+.mod__value {
+    flex: 1;
+    word-break: break-all;
+}

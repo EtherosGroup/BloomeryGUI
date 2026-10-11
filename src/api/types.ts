@@ -20,8 +20,16 @@ export interface CliErrorEnvelope {
     error: CliErrorPayload
 }
 
-/** 进度通道稳定键（CLI 侧 A1） */
-export const PROGRESS_KEYS = ['clientJar', 'library', 'natives', 'assets', 'files'] as const
+/** 进度通道稳定键（CLI 侧 A1）；mod 由 mod install 与 mod list 反查共用，account 是启动前续期 */
+export const PROGRESS_KEYS = [
+    'clientJar',
+    'library',
+    'natives',
+    'assets',
+    'files',
+    'mod',
+    'account',
+] as const
 
 export type ProgressKey = (typeof PROGRESS_KEYS)[number]
 
@@ -126,10 +134,10 @@ export interface CliStatus {
     features: string[]
 }
 
-/** 实例加载器 */
+/** 实例加载器；原版实例 CLI 给 type 为 vanilla 且 version 为 null */
 export interface CliLoader {
     type: string
-    version: string
+    version: string | null
 }
 
 /** 实例可用状态 */
@@ -197,7 +205,8 @@ export interface CliLaunchResult {
     /** 启动参数，--dry-run 下用于展示命令 */
     args?: string[]
     java?: { major: number; vendor: string; kind: string }
-    account?: { name: string; uuid: string; kind: string }
+    /** needsRefresh 是 1.13.1 起才有，缺失表示引擎更旧 */
+    account?: { name: string; uuid: string; kind: string; needsRefresh?: boolean }
     selectedInstance: string | null
     /** 启动的进程号 */
     pid: number | null
@@ -267,4 +276,155 @@ export interface CliInstallReport {
     official: unknown
     timing: { downloadMs: number; finishMs: number }
     warnings: string[]
+}
+
+/* ---------- mod：检索、列表、安装与管理 ---------- */
+
+/** mod 命令要求的 api；低于它没有这些命令 */
+export const MOD_API_REQUIRED = 2
+
+/** mod search 的命中项 */
+export interface CliModHit {
+    id: string
+    slug: string
+    title: string
+    description: string
+    downloads: number
+    loaders: string[]
+    /** 项目声明支持的版本，不代表一定兼容当前加载器组合 */
+    gameVersions: string[]
+    categories: string[]
+}
+
+/** mod search 结果；三个上下文字段未指定时是显式 null */
+export interface CliModSearch {
+    v: number
+    query: string
+    /** 实例 id，没给 --version/--folder 为 null */
+    instance: string | null
+    gameVersion: string | null
+    /** 原版实例为 null */
+    loader: string | null
+    hits: CliModHit[]
+}
+
+/** mod list 的单个文件 */
+export interface CliModFile {
+    /** 磁盘上的真实文件名，禁用态带 .disabled */
+    filename: string
+    path: string
+    size: number
+    /** 读不到时为 null */
+    sha1: string | null
+    enabled: boolean
+    /** 反查成功才为 true；false 时 project 与 version 均为 null，字段本身在 */
+    resolved: boolean
+    project: { id: string; slug: string; title: string } | null
+    version: { id: string; number: string; type: string } | null
+}
+
+/** mod list 结果 */
+export interface CliModList {
+    v: number
+    instance: string
+    /** 实例的 mods 目录绝对路径 */
+    mods: string
+    files: CliModFile[]
+}
+
+/** 改名条目 */
+export interface CliModChange {
+    from: string
+    /** remove 为 null，disable 为 .disabled 名，enable 为 .jar 名 */
+    to: string | null
+    path: string
+}
+
+/** 没处理的目标；reason 是稳定机器键 */
+export interface CliModSkip {
+    target: string
+    reason: string
+}
+
+/** remove / disable / enable 结果；有 skipped 时退出码 1，不抛异常 */
+export interface CliModMutation {
+    v: number
+    instance: string
+    mods: string
+    action: string
+    dryRun: boolean
+    changed: CliModChange[]
+    skipped: CliModSkip[]
+}
+
+/** 装进去的单个文件 */
+export interface CliModInstalledFile {
+    projectId: string
+    title: string
+    filename: string
+    path: string
+    size: number
+    version: string
+    /** 同名文件本来就有 */
+    skipped: boolean
+}
+
+/** required 之外的依赖只提示 */
+export interface CliModDependency {
+    projectId: string | null
+    type: string
+    title: string | null
+    requirement: string
+}
+
+/** mod install 的一条成功结果 */
+export interface CliModInstallEntry {
+    query: string
+    ok: boolean
+    project: { id: string; slug: string; title: string }
+    version: {
+        id: string
+        number: string
+        type: string
+        gameVersions: string[]
+        loaders: string[]
+    }
+    files: CliModInstalledFile[]
+    dependencies: CliModDependency[]
+    warnings: string[]
+}
+
+/** mod install 的一条失败结果；单条失败不再抛错，由这里带出 */
+export interface CliModInstallFailure {
+    query: string
+    ok: boolean
+    code: string
+    detail: string
+    retryable: boolean
+}
+
+/** mod install 结果；单条与多条同形状 */
+export interface CliModInstallResult {
+    v: number
+    instance: string
+    mods: string
+    installs: CliModInstallEntry[]
+    failed: CliModInstallFailure[]
+}
+
+/** 下载队列里的任务，--async 才有 */
+export interface CliModTask {
+    id: string
+    type: string
+    target: string
+    state: string
+    progress: unknown
+}
+
+/** mod install --async 结果 */
+export interface CliModAsyncResult {
+    v: number
+    instance: string
+    tasks: CliModTask[]
+    spawn: { outcome: string; pid: number | null; log: string | null }
 }

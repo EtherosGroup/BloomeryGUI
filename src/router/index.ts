@@ -89,6 +89,22 @@ const routes = [
         },
     },
     {
+        path: '/mod/install',
+        name: 'mod-install',
+        component: () => import('@/views/mod/ModInstallView.vue'),
+        meta: {
+            title: '安装模组',
+        },
+    },
+    {
+        path: '/mod/batch-install',
+        name: 'mod-batch-install',
+        component: () => import('@/views/mod/ModBatchInstallView.vue'),
+        meta: {
+            title: '批量安装',
+        },
+    },
+    {
         path: '/:pathMatch(.*)*',
         name: 'not-found',
         component: () => import('@/views/error/NotFoundView.vue'),
