@@ -53,6 +53,13 @@ export interface CliRunOptions {
     onProgress?: (event: CliProgressEvent) => void
     /** 探活一类不需要进度的调用传 false */
     progress?: boolean
+    /**
+     * 这些退出码仍按成功解析 stdout
+     *
+     * 用于带业务结果的非零退出：mod install 有 failed[] 与 mod remove 一类有 skipped[] 时
+     * 退出码为 1，stdout 是结果对象；错误信封仍优先
+     */
+    acceptExit?: number[]
 }
 
 export interface BloomeryClientOptions {
@@ -233,15 +240,15 @@ export class BloomeryClient {
         }
 
         const payload = readErrorPayload(result.stdout)
-        if (result.code !== CLI_EXIT.ok || payload) {
-            if (payload) {
-                throw new BloomeryError(payload.code, payload.message, {
-                    exit: payload.exit,
-                    retryable: payload.retryable,
-                    detail: payload.detail,
-                    payload,
-                })
-            }
+        if (payload) {
+            throw new BloomeryError(payload.code, payload.message, {
+                exit: payload.exit,
+                retryable: payload.retryable,
+                detail: payload.detail,
+                payload,
+            })
+        }
+        if (result.code !== CLI_EXIT.ok && !(options.acceptExit ?? []).includes(result.code)) {
             throw new BloomeryError(
                 LOCAL_ERROR_CODE.envelopeMissing,
                 `退出码 ${result.code}，stdout 无错误信封`,
