@@ -213,7 +213,8 @@ export interface CliLaunchResult {
     /** 游戏日志路径 */
     log: string | null
     missing: string[]
-    repair: unknown
+    /** 只有真启动才有；补不动的项在 warnings 里 */
+    repair: { warnings?: string[] } | null
 }
 
 /** 某个加载器在一个游戏版本上的规模，来自 view loader --game */

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { PhCheck, PhWarning } from '@phosphor-icons/vue'
 import GroupButton from '@/components/GroupButton.vue'
 import Spinner from '@/components/Spinner.vue'
+import ProgressLanes from '@/components/ProgressLanes.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { accountTypeLabel } from '@/utils/accountAvatar'
 import { diagInfo } from '@/api/diagnostics'
@@ -43,15 +44,6 @@ async function copyDiag(): Promise<void> {
 }
 
 const visible = computed(() => launch.active && launch.steps.length > 0)
-
-/** 最近一条进度：阶段与计数 */
-const progressText = computed(() => {
-    const event = launch.latest
-    if (event === null) {
-        return ''
-    }
-    return event.total > 0 ? `${event.stage} ${event.done}/${event.total}` : event.stage
-})
 
 const finished = computed(
     () => launch.steps.length > 0 && launch.steps.every((step) => step.state === 'done'),
@@ -136,8 +128,11 @@ onBeforeUnmount(() => {
                     <span>已用 {{ launch.elapsedSeconds }} 秒</span>
                 </p>
                 <p v-if="launch.phaseHint" class="launching__hint">{{ launch.phaseHint }}</p>
+                <p v-for="warning in launch.warnings" :key="warning" class="launching__hint">
+                    {{ warning }}
+                </p>
 
-                <p v-if="progressText" class="launching__progress">{{ progressText }}</p>
+                <ProgressLanes :events="launch.events" />
 
                 <p v-if="launch.cancelled" class="launching__note">已取消</p>
                 <p v-else-if="failureText" class="launching__failure">{{ failureText }}</p>
@@ -294,16 +289,6 @@ onBeforeUnmount(() => {
 
 .launching__diag {
     align-self: flex-start;
-}
-
-.launching__progress {
-    margin: 0;
-
-    color: var(--text-color-dark);
-    font-family: ui-monospace, monospace;
-    font-size: var(--font-size-xs);
-
-    word-break: break-all;
 }
 
 .launching__note {

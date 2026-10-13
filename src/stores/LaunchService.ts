@@ -58,12 +58,12 @@ export const useLaunchService = defineStore(
         const active = ref(false)
         /** 窗口判定依据，来自 game_status */
         const windowEvidence = ref('')
+        /** 补全时的警告：资源索引一类补不动的项只说在这里 */
+        const warnings = ref<string[]>([])
 
         const steps = ref<LaunchStep[]>([])
 
         const running = computed(() => busy.value)
-        /** 最近一条进度：阶段名与已完成数 */
-        const latest = computed(() => events.value[events.value.length - 1] ?? null)
 
         /** 本次启动微软凭据待续期；续期期间 CLI 无进度事件 */
         const credentialsPending = ref(false)
@@ -330,6 +330,10 @@ export const useLaunchService = defineStore(
                 pid.value = result.pid ?? null
                 logPath.value = result.log ?? ''
                 gameDirectory.value = result.directory ?? ''
+                warnings.value = result.repair?.warnings ?? []
+                for (const warning of warnings.value) {
+                    trace('补全警告', warning)
+                }
                 logs.value = await collectLogs(result)
                 trace('launch 返回 pid=', result.pid ?? null, 'log=', result.log ?? '(无)')
                 setStep('credentials', 'done')
@@ -403,6 +407,7 @@ export const useLaunchService = defineStore(
             busy,
             active,
             windowEvidence,
+            warnings,
             steps,
             credentialsPending,
             currentStep,
@@ -410,7 +415,6 @@ export const useLaunchService = defineStore(
             elapsedSeconds,
             phaseHint,
             running,
-            latest,
             prepare,
             start,
             cancel,
