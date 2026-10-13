@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterView } from 'vue-router'
 import LoadingPage from '@/components/LoadingPage.vue'
 import NavComponent from '@/components/NavComponent.vue'
@@ -16,6 +16,8 @@ const isLoadingPageVisible = ref(true)
 
 const router = useRouter()
 const route = useRoute()
+/** 当前页面是否不铺背景图 */
+const plainBackground = computed(() => route.meta.plainBackground === true)
 const env = useEnvironmentCheckService()
 const mountedAt = performance.now()
 
@@ -46,7 +48,7 @@ onMounted(async () => {
     <LoadingPage :visible="isLoadingPageVisible" />
 
     <div class="app">
-        <div class="app__background" aria-hidden="true"></div>
+        <div v-if="!plainBackground" class="app__background" aria-hidden="true"></div>
 
         <NavComponent v-if="route.path !== '/setup'" />
 

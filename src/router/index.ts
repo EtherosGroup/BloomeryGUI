@@ -4,6 +4,8 @@ import NProgress from 'nprogress'
 declare module 'vue-router' {
     interface RouteMeta {
         title?: string
+        /** 不铺背景图：文字压在图片上会看不清 */
+        plainBackground?: boolean
     }
 }
 
@@ -22,6 +24,7 @@ const routes = [
         component: () => import('@/views/setup/SetupView.vue'),
         meta: {
             title: '环境配置',
+            plainBackground: true,
         },
     },
     {
