@@ -10,7 +10,7 @@ import GroupInput from '@/components/GroupInput.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
 import PopupMenu from '@/components/PopupMenu.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
-import { useVersionService } from '@/stores/VersionService'
+import { useVersionService, type RemovedInstance } from '@/stores/VersionService'
 import { errorSummary } from '@/api/errorMessages'
 import type { CliFolder, CliInstance, CliLaunchResult } from '@/api/types'
 import { useLaunchService } from '@/stores/LaunchService'
@@ -72,6 +72,36 @@ function instancesIn(folderId: string): CliInstance[] {
     )
 }
 
+/** 已移除的版本：挪到 .removed 里的那些，可以恢复 */
+const removedRows = ref<RemovedInstance[]>([])
+/** 正在恢复的版本 id */
+const restoring = ref('')
+
+async function loadRemoved(): Promise<void> {
+    removedRows.value = await versionService.loadRemoved()
+}
+
+async function restoreRemoved(row: RemovedInstance): Promise<void> {
+    if (restoring.value.length > 0) {
+        return
+    }
+    restoring.value = row.id
+    try {
+        const failure = await versionService.restoreInstance(row.id, row.folderId)
+        if (failure !== null) {
+            const detail = failure.detail === null ? '' : ` · ${failure.detail}`
+            notifyError(
+                `${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`,
+            )
+            return
+        }
+        await loadRemoved()
+        notifySuccess(`已恢复 · ${row.id}`)
+    } finally {
+        restoring.value = ''
+    }
+}
+
 /** 搜索时展开有命中的组 */
 const searching = computed(() => keyword.value.trim().length > 0)
 
@@ -100,6 +130,7 @@ function selectedOf(folder: CliFolder): string | null {
 
 async function refresh(): Promise<void> {
     await versionService.reloadAll()
+    await loadRemoved()
 }
 
 async function setCurrent(folder: CliFolder): Promise<void> {
@@ -294,6 +325,7 @@ onMounted(async () => {
     if (first.length > 0) {
         opened.value = { ...opened.value, [first]: true }
     }
+    await loadRemoved()
 })
 </script>
 
@@ -554,6 +586,27 @@ onMounted(async () => {
             </div>
         </PopupWindow>
 
+        <CollapsibleGroup v-if="removedRows.length > 0" label="已移除的版本">
+            <p class="versions__note">挪进文件夹下的 .removed，磁盘文件保留</p>
+            <div class="versions__removed">
+                <div
+                    v-for="row in removedRows"
+                    :key="`${row.folderId}/${row.id}`"
+                    class="versions__removed-row"
+                >
+                    <span class="versions__removed-name">{{ row.id }}</span>
+                    <span class="versions__note">{{ row.folderName }}</span>
+                    <GroupButton
+                        variant="ghost"
+                        :disabled="restoring.length > 0"
+                        @click="restoreRemoved(row)"
+                    >
+                        {{ restoring === row.id ? '恢复中' : '恢复' }}
+                    </GroupButton>
+                </div>
+            </div>
+        </CollapsibleGroup>
+
         <GameLaunching />
     </main>
 </template>
@@ -656,6 +709,28 @@ onMounted(async () => {
 
     color: var(--text-color-dark);
     font-size: var(--font-size-sm);
+}
+
+/* 已移除的版本：一行一个，右侧恢复按钮 */
+.versions__removed {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.versions__removed-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.versions__removed-name {
+    flex: 1;
+
+    min-width: 0;
+
+    font-size: var(--font-size-sm);
+    word-break: break-all;
 }
 
 .versions__list {

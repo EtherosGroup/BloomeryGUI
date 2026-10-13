@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { pathStamps } from '@/api/files'
-import type { CliFolder, CliVersionList } from '@/api/types'
+import type { CliFolder, CliRemovedList, CliVersionList } from '@/api/types'
 import { useCli } from '@/composables/useCli'
 
 export interface VersionFailure {
@@ -11,6 +11,14 @@ export interface VersionFailure {
     detail: string | null
     /** 来自错误信封，可重试才有意义 */
     retryable: boolean
+}
+
+/** 已移除的版本，来自 version removed */
+export interface RemovedInstance {
+    folderId: string
+    folderName: string
+    id: string
+    directory: string
 }
 
 /** folder add 的返回：只有 id / path / versionCount，没有列表行那些字段 */
@@ -313,6 +321,54 @@ export const useVersionService = defineStore('VersionService', () => {
         }
     }
 
+    /**
+     * 各文件夹里被移除的版本
+     *
+     * 单个文件夹取不到不影响其余，返回空数组表示都没有
+     */
+    async function loadRemoved(): Promise<RemovedInstance[]> {
+        const rows: RemovedInstance[] = []
+        const client = await useCli().client()
+        for (const folder of folders.value) {
+            try {
+                const result = await client.run<CliRemovedList>(
+                    ['version', 'removed', '--folder', folder.id],
+                    { progress: false },
+                )
+                for (const item of result.versions ?? []) {
+                    rows.push({
+                        folderId: folder.id,
+                        folderName: folder.name,
+                        id: item.id,
+                        directory: item.directory,
+                    })
+                }
+            } catch {
+                // 这个文件夹取不到就跳过
+            }
+        }
+        return rows
+    }
+
+    /** 恢复被移除的版本：从 .removed 挪回 versions */
+    async function restoreInstance(
+        instanceId: string,
+        folder: string,
+    ): Promise<VersionFailure | null> {
+        const args = ['version', 'restore', instanceId]
+        if (folder.length > 0) {
+            args.push('--folder', folder)
+        }
+        try {
+            const client = await useCli().client()
+            await client.run(args, { progress: false })
+            await reloadAll()
+            return null
+        } catch (error) {
+            return toFailure(error)
+        }
+    }
+
     /** 启动实例：GUI 一律 --detach，不等游戏退出 */
     async function launch(
         instanceId: string,
@@ -373,6 +429,8 @@ export const useVersionService = defineStore('VersionService', () => {
         setCurrentFolder,
         addFolder,
         removeInstance,
+        loadRemoved,
+        restoreInstance,
         launch,
     }
 })

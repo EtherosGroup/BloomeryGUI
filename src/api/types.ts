@@ -413,6 +413,22 @@ export interface CliModInstallResult {
     failed: CliModInstallFailure[]
 }
 
+/** version removed 列出的一个已移除版本 */
+export interface CliRemovedInstance {
+    id: string
+    /** 已移除版本的目录；CLI 里叫 directory */
+    directory: string
+}
+
+/** version removed 结果；空列表也是成功 */
+export interface CliRemovedList {
+    v: number
+    action: string
+    folder: string
+    path: string
+    versions: CliRemovedInstance[]
+}
+
 /** 下载队列里的任务，--async 才有 */
 export interface CliModTask {
     id: string
