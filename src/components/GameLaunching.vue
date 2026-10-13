@@ -131,6 +131,16 @@ onBeforeUnmount(() => {
                 <p v-for="warning in launch.warnings" :key="warning" class="launching__hint">
                     {{ warning }}
                 </p>
+                <p
+                    v-for="warning in launch.failure?.warnings ?? []"
+                    :key="warning"
+                    class="launching__hint"
+                >
+                    {{ warning }}
+                </p>
+                <p v-if="launch.failure?.first" class="launching__hint">
+                    {{ launch.failure.first }}
+                </p>
 
                 <ProgressLanes :events="launch.events" />
 

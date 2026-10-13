@@ -30,6 +30,10 @@ export interface LaunchFailure {
     detail: string | null
     /** 来自错误信封，可重试才有意义 */
     retryable: boolean
+    /** 信封 context 里带的补全警告，失败路径上错因只说在这里 */
+    warnings: string[]
+    /** 信封 context 里带的首个出错目标，如某个文件连不上 */
+    first: string | null
 }
 
 /** 启动流程：确认信息、步骤进度、取消与日志位置 */
@@ -162,6 +166,34 @@ export const useLaunchService = defineStore(
             steps.value = steps.value.map((step) => (step.key === key ? { ...step, state } : step))
         }
 
+        /** 信封 context 里的字符串数组，形状不对按没有处理 */
+        function warningsOf(error: unknown): string[] {
+            if (!(error instanceof BloomeryError)) {
+                return []
+            }
+            const context = error.payload?.context
+            if (typeof context !== 'object' || context === null) {
+                return []
+            }
+            const rows = (context as { warnings?: unknown }).warnings
+            return Array.isArray(rows)
+                ? rows.filter((item): item is string => typeof item === 'string')
+                : []
+        }
+
+        /** 信封 context.first：首个出错的目标 */
+        function firstOf(error: unknown): string | null {
+            if (!(error instanceof BloomeryError)) {
+                return null
+            }
+            const context = error.payload?.context
+            if (typeof context !== 'object' || context === null) {
+                return null
+            }
+            const first = (context as { first?: unknown }).first
+            return typeof first === 'string' && first.length > 0 ? first : null
+        }
+
         function toFailure(error: unknown): LaunchFailure {
             return error instanceof BloomeryError
                 ? {
@@ -169,8 +201,17 @@ export const useLaunchService = defineStore(
                       message: error.message,
                       detail: error.detail,
                       retryable: error.retryable,
+                      warnings: warningsOf(error),
+                      first: firstOf(error),
                   }
-                : { code: 'Unknown', message: String(error), detail: null, retryable: false }
+                : {
+                      code: 'Unknown',
+                      message: String(error),
+                      detail: null,
+                      retryable: false,
+                      warnings: [],
+                      first: null,
+                  }
         }
 
         /** 游戏目录：用于读游戏自己的日志 */
