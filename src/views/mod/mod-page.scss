@@ -173,54 +173,6 @@
     border-radius: calc(var(--border-radius) / 2);
 }
 
-.mod__lanes {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-
-    margin: 0;
-    padding: 0;
-
-    list-style: none;
-}
-
-.mod__lane {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-
-    font-size: var(--font-size-xs);
-}
-
-.mod__lane-label {
-    min-width: 5rem;
-}
-
-.mod__lane-track {
-    flex: 1;
-    height: 0.4rem;
-
-    overflow: hidden;
-
-    background-color: var(--clickable-bg);
-    border-radius: calc(var(--border-radius) / 2);
-}
-
-.mod__lane-bar {
-    display: block;
-    height: 100%;
-
-    background-color: var(--text-color);
-
-    transition: width var(--transition-duration) var(--transition-ease);
-}
-
-.mod__lane-count {
-    min-width: 7rem;
-    color: var(--text-color-dark);
-    text-align: right;
-}
-
 .mod__result {
     display: flex;
     flex-direction: column;

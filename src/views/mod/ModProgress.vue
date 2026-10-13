@@ -2,11 +2,12 @@
 import { computed } from 'vue'
 import CollapsibleGroup from '@/components/CollapsibleGroup.vue'
 import GroupButton from '@/components/GroupButton.vue'
+import ProgressLanes from '@/components/ProgressLanes.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { openPath } from '@/api/system'
 import { useModService } from '@/stores/ModService'
 import { notifyError } from '@/utils/notify'
-import { laneCountText, percentText, sizeText } from '@/utils/modText'
+import { sizeText } from '@/utils/modText'
 
 /** mod install 的进度与结果，单装页与批量页共用 */
 const mod = useModService()
@@ -14,20 +15,6 @@ const mod = useModService()
 const visible = computed(
     () => mod.installBusy || mod.installReport !== null || mod.installFailure !== null,
 )
-
-/** 每个通道各自的最新计数；未知 key 归到兜底通道 */
-const progressRows = computed(() => {
-    const rows = new Map<string, { label: string; done: number; total: number; bytes: boolean }>()
-    for (const event of mod.installEvents) {
-        rows.set(event.key ?? event.stage, {
-            label: event.stage,
-            done: event.done,
-            total: event.total,
-            bytes: event.bytes,
-        })
-    }
-    return [...rows.values()]
-})
 
 /** 装成了什么：逐条列文件，skipped 表示本来就有 */
 const installedEntries = computed(() => {
@@ -62,16 +49,10 @@ async function openMods(): Promise<void> {
 
 <template>
     <CollapsibleGroup v-if="visible" label="进度" default-open>
-        <ul v-if="progressRows.length > 0" class="mod__lanes">
-            <li v-for="lane in progressRows" :key="lane.label" class="mod__lane">
-                <span class="mod__lane-label">{{ lane.label }}</span>
-                <span class="mod__lane-track">
-                    <span class="mod__lane-bar" :style="{ width: percentText(lane) }"></span>
-                </span>
-                <span class="mod__lane-count">{{ laneCountText(lane) }}</span>
-            </li>
-        </ul>
-        <p v-else-if="mod.installBusy" class="mod__note">已开始，等待进度</p>
+        <ProgressLanes
+            :events="mod.installEvents"
+            :waiting="mod.installBusy ? '已开始，等待进度' : ''"
+        />
 
         <p v-if="mod.installCancelled" class="mod__note">已取消</p>
         <p v-else-if="mod.installFailure !== null" class="mod__failure">

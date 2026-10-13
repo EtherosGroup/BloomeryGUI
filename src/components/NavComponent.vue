@@ -10,6 +10,7 @@ import {
     PhGear,
     PhUser,
     PhPuzzlePiece,
+    PhDownload,
 } from '@phosphor-icons/vue'
 import AccountMenu from '@/components/AccountMenu.vue'
 import type { CliAccount } from '@/api/account'
@@ -57,6 +58,15 @@ const groups: NavGroup[] = [
         label: '账户',
         icon: PhUser,
         items: [{ label: '账户管理', to: '/account' }],
+    },
+    {
+        id: 'download',
+        label: '下载管理',
+        icon: PhDownload,
+        items: [
+            { label: '安装任务', to: '/download/version' },
+            { label: 'MOD下载', to: '/download/mod' },
+        ],
     },
     {
         id: 'general',

@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import BackButton from '@/components/BackButton.vue'
 import CollapsibleGroup from '@/components/CollapsibleGroup.vue'
 import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import GroupSelect from '@/components/GroupSelect.vue'
+import ProgressLanes from '@/components/ProgressLanes.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { fetchGameVersions, type GameVersion } from '@/api/manifest'
-import type {
-    CliDownloadReport,
-    CliGameLoader,
-    CliLoaderChannel,
-    CliLoaderVersion,
-} from '@/api/types'
-import { LOADER_NAMES, useInstallService } from '@/stores/InstallService'
+import type { CliGameLoader, CliLoaderChannel, CliLoaderVersion } from '@/api/types'
+import { LOADER_NAMES, useInstallService, type InstallTarget } from '@/stores/InstallService'
+import { installReportRows } from '@/utils/installReport'
 import { useVersionService } from '@/stores/VersionService'
 import type { ChoiceOptionType } from '@/types/ChoiceOptionType'
 import { versionTypeLabel } from '@/utils/versionLabel'
@@ -115,71 +112,20 @@ const commandPreview = computed(() => {
 
 const canStart = computed(() => !install.busy && game.value.length > 0 && folderId.value.length > 0)
 
-/** 五行通道各自的最新计数 */
-const progressRows = computed(() => {
-    const rows = new Map<string, { label: string; done: number; total: number; bytes: boolean }>()
-    for (const event of install.events) {
-        rows.set(event.key ?? event.stage, {
-            label: event.stage,
-            done: event.done,
-            total: event.total,
-            bytes: event.bytes,
-        })
-    }
-    return [...rows.values()]
-})
+/** 当前选择对应的安装目标，前台与后台共用 */
+const currentTarget = computed<InstallTarget>(() => ({
+    game: game.value,
+    loader: loaderName.value,
+    loaderVersion: loaderVersion.value,
+    name: displayName.value,
+}))
 
-const reportRows = computed(() => {
-    const report = install.report
-    if (report === null) {
-        return []
-    }
-    return [
-        { key: '实例', value: report.name },
-        {
-            key: '加载器',
-            value:
-                report.loader === null ? '原版' : `${report.loader.name} ${report.loader.version}`,
-        },
-        { key: '库', value: laneText(report.libraries) },
-        {
-            key: 'natives',
-            value: `${report.natives.jars} 个 jar · ${laneText(report.natives.report)}`,
-        },
-        {
-            key: '资源',
-            value:
-                report.assets === null
-                    ? '未装'
-                    : `${laneText(report.assets.index)} · ${laneText(report.assets.objects)}`,
-        },
-        { key: '耗时', value: `${seconds(report.timing.downloadMs + report.timing.finishMs)}` },
-        { key: '警告', value: report.warnings.length === 0 ? '无' : report.warnings.join(' · ') },
-    ]
-})
+/** 进度分组，点开始安装后滚到这里 */
+const progressRef = ref<HTMLElement | null>(null)
 
-function laneText(row: CliDownloadReport): string {
-    const failed = row.failures.length === 0 ? '' : ` · 失败 ${row.failures.length}`
-    return `新下 ${row.downloaded} · 已有 ${row.skipped}${failed}`
-}
-
-function seconds(ms: number): string {
-    return `${Math.round(ms / 1000)} 秒`
-}
-
-function percent(row: { done: number; total: number }): string {
-    if (row.total <= 0) {
-        return '0%'
-    }
-    return `${Math.min(100, Math.round((row.done / row.total) * 100))}%`
-}
-
-/** 字节通道按 MB 显示，其余按条数 */
-function laneCount(row: { done: number; total: number; bytes: boolean }): string {
-    const text = (value: number): string =>
-        row.bytes ? `${(value / 1024 / 1024).toFixed(1)} MB` : String(value)
-    return `${text(row.done)}/${text(row.total)}`
-}
+const reportRows = computed(() =>
+    install.report === null ? [] : installReportRows(install.report),
+)
 
 /** 拉清单，默认选最新正式版；force 供刷新按钮 */
 async function loadVersions(force = false): Promise<void> {
@@ -321,15 +267,11 @@ async function start(): Promise<void> {
     if (!canStart.value) {
         return
     }
-    const ok = await install.start(
-        {
-            game: game.value,
-            loader: loaderName.value,
-            loaderVersion: loaderVersion.value,
-            name: displayName.value,
-        },
-        folderId.value,
-    )
+    const running = install.start(currentTarget.value, folderId.value)
+    // 进度分组要等 busy 为真才渲染
+    await nextTick()
+    progressRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const ok = await running
     if (!ok) {
         reportFailure()
         return
@@ -346,6 +288,16 @@ async function cancel(): Promise<void> {
 
 function toList(): void {
     void router.push('/version/list')
+}
+
+/** 转后台：把正在跑的这次安装交给下载任务，同一次调用不重启 */
+function runInBackground(): void {
+    const id = install.detach()
+    if (id === null) {
+        return
+    }
+    notifySuccess('已转入后台 · 安装任务')
+    void router.push('/download/version')
 }
 
 onMounted(async () => {
@@ -620,55 +572,69 @@ function reportFailure(): void {
                 <GroupButton :disabled="!canStart" @click="start">
                     {{ install.busy ? '安装中' : '开始安装' }}
                 </GroupButton>
-                <GroupButton v-if="install.busy" variant="ghost" @click="cancel">取消</GroupButton>
+                <!-- 转后台后这次安装的控制权在任务页 -->
+                <GroupButton
+                    v-if="install.busy && !install.detached"
+                    variant="ghost"
+                    @click="cancel"
+                >
+                    取消
+                </GroupButton>
+                <!-- 只在这次安装还在本页显示时出现：点击交给后台任务 -->
+                <GroupButton
+                    v-if="install.busy && !install.detached"
+                    variant="ghost"
+                    @click="runInBackground"
+                >
+                    后台安装
+                </GroupButton>
             </div>
+            <p v-if="install.detached" class="install__note">已转入后台 · 安装任务页查看进度</p>
         </CollapsibleGroup>
 
-        <CollapsibleGroup
-            v-if="install.busy || install.report !== null || install.failure !== null"
-            label="进度"
-            default-open
+        <div
+            v-if="
+                !install.detached &&
+                (install.busy || install.report !== null || install.failure !== null)
+            "
+            ref="progressRef"
         >
-            <ul v-if="progressRows.length > 0" class="install__lanes">
-                <li v-for="lane in progressRows" :key="lane.label" class="install__lane">
-                    <span class="install__lane-label">{{ lane.label }}</span>
-                    <span class="install__lane-track">
-                        <span class="install__lane-bar" :style="{ width: percent(lane) }"></span>
+            <CollapsibleGroup label="进度" default-open>
+                <ProgressLanes
+                    :events="install.events"
+                    :waiting="install.busy ? '已开始，等待进度' : ''"
+                />
+
+                <p v-if="install.cancelled" class="install__note">已取消</p>
+                <p v-else-if="install.failure !== null" class="install__failure">
+                    <span class="install__failure-code">
+                        {{
+                            errorSummary(
+                                install.failure.code,
+                                install.failure.message,
+                                install.failure.retryable,
+                            )
+                        }}
                     </span>
-                    <span class="install__lane-count">{{ laneCount(lane) }}</span>
-                </li>
-            </ul>
-            <p v-else-if="install.busy" class="install__note">已开始，等待进度</p>
+                    <span v-if="install.failure.detail" class="install__failure-detail">
+                        {{ install.failure.detail }}
+                    </span>
+                </p>
 
-            <p v-if="install.cancelled" class="install__note">已取消</p>
-            <p v-else-if="install.failure !== null" class="install__failure">
-                <span class="install__failure-code">
-                    {{
-                        errorSummary(
-                            install.failure.code,
-                            install.failure.message,
-                            install.failure.retryable,
-                        )
-                    }}
-                </span>
-                <span v-if="install.failure.detail" class="install__failure-detail">
-                    {{ install.failure.detail }}
-                </span>
-            </p>
-
-            <template v-if="install.report !== null">
-                <div class="install__rows">
-                    <div v-for="row in reportRows" :key="row.key" class="install__row">
-                        <span class="install__key">{{ row.key }}</span>
-                        <span class="install__value">{{ row.value }}</span>
+                <template v-if="install.report !== null">
+                    <div class="install__rows">
+                        <div v-for="row in reportRows" :key="row.key" class="install__row">
+                            <span class="install__key">{{ row.key }}</span>
+                            <span class="install__value">{{ row.value }}</span>
+                        </div>
                     </div>
-                </div>
-                <div class="install__actions">
-                    <GroupButton variant="ghost" @click="toList">去版本列表</GroupButton>
-                    <GroupButton variant="ghost" @click="install.close">关闭</GroupButton>
-                </div>
-            </template>
-        </CollapsibleGroup>
+                    <div class="install__actions">
+                        <GroupButton variant="ghost" @click="toList">去版本列表</GroupButton>
+                        <GroupButton variant="ghost" @click="install.close">关闭</GroupButton>
+                    </div>
+                </template>
+            </CollapsibleGroup>
+        </div>
     </main>
 </template>
 
@@ -964,55 +930,6 @@ function reportFailure(): void {
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
-}
-
-.install__lanes {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-
-    margin: 0;
-    padding: 0;
-
-    list-style: none;
-}
-
-.install__lane {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-
-    font-size: var(--font-size-xs);
-}
-
-.install__lane-label {
-    flex: 0 0 6rem;
-
-    color: var(--text-color-dark);
-}
-
-.install__lane-track {
-    flex: 1;
-    min-width: 0;
-    height: 0.4rem;
-
-    background-color: var(--bg-color-dark);
-    border-radius: 999px;
-    overflow: hidden;
-}
-
-.install__lane-bar {
-    display: block;
-    height: 100%;
-
-    background-color: var(--text-color);
-}
-
-.install__lane-count {
-    flex: 0 0 6rem;
-
-    font-family: ui-monospace, monospace;
-    text-align: right;
 }
 
 .install__rows {

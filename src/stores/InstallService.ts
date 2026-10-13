@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { killCli } from '@/api/transport.tauri'
 import type { CliGameLoader, CliInstallReport, CliLoaderPage, CliProgressEvent } from '@/api/types'
+import { installArgs, type InstallTarget } from '@/api/installArgs'
+import { useDownloadService } from '@/stores/DownloadService'
 import { useCli } from '@/composables/useCli'
 
 /** 四家加载器，顺序与 CLI 一致 */
@@ -16,17 +18,6 @@ export interface InstallFailure {
     retryable: boolean
 }
 
-/** 一次安装要装什么 */
-export interface InstallTarget {
-    game: string
-    /** null 表示不装加载器 */
-    loader: string | null
-    /** null 表示由 CLI 取最新 */
-    loaderVersion: string | null
-    /** 显示名，留空由 CLI 推导 */
-    name: string
-}
-
 function toFailure(error: unknown): InstallFailure {
     return error instanceof BloomeryError
         ? {
@@ -38,11 +29,30 @@ function toFailure(error: unknown): InstallFailure {
         : { code: 'Unknown', message: String(error), detail: null, retryable: false }
 }
 
+export type { InstallTarget } from '@/api/installArgs'
+
+/** 进行中安装的落点：转后台后换成写下载任务 */
+interface ActiveInstall {
+    id: string
+    target: InstallTarget
+    folderId: string
+    startedAt: number
+    emit: (event: CliProgressEvent) => void
+    finish: (report: CliInstallReport) => void
+    abort: (failure: InstallFailure) => void
+    /** 这次调用被取消 */
+    aborted: () => void
+}
+
 /** 安装新版本：加载器查询、进度事件、取消与结果 */
 export const useInstallService = defineStore('InstallService', () => {
     const busy = ref(false)
     /** 进行中的调用 id，用于 killCli */
     const callId = ref('')
+    /** 进行中的安装；转后台后事件与结果改写到下载任务 */
+    let active: ActiveInstall | null = null
+    /** 这次安装是否已转后台：转了之后本页不再显示进度 */
+    const detached = ref(false)
     const events = ref<CliProgressEvent[]>([])
     const failure = ref<InstallFailure | null>(null)
     const report = ref<CliInstallReport | null>(null)
@@ -64,8 +74,6 @@ export const useInstallService = defineStore('InstallService', () => {
     /** 换游戏版本时，晚回来的旧请求作废 */
     let loadersSeq = 0
 
-    /** 最近一条进度 */
-    const latest = computed(() => events.value[events.value.length - 1] ?? null)
     const running = computed(() => busy.value)
 
     /** 单家查询：失败交给调用方处理，不写页面级 failure */
@@ -211,42 +219,74 @@ export const useInstallService = defineStore('InstallService', () => {
         failure.value = null
         report.value = null
         events.value = []
+        detached.value = false
 
         const id = `install-${next.game}-${Date.now()}`
         callId.value = id
+        const running: ActiveInstall = {
+            id,
+            target: next,
+            folderId,
+            startedAt: Date.now(),
+            emit: (event) => {
+                events.value = [...events.value, event].slice(-200)
+            },
+            finish: (result) => {
+                report.value = result
+            },
+            abort: (error) => {
+                failure.value = error
+            },
+            aborted: () => undefined,
+        }
+        active = running
         try {
             const client = await useCli().client()
-            const args = ['install', next.game]
-            if (folderId.length > 0) {
-                args.push('--folder', folderId)
-            }
-            if (next.loader !== null) {
-                const spec =
-                    next.loaderVersion === null
-                        ? next.loader
-                        : `${next.loader}@${next.loaderVersion}`
-                args.push('--loader', spec)
-            }
-            if (next.name.trim().length > 0) {
-                args.push('--name', next.name.trim())
-            }
-            const result = await client.run<CliInstallReport>(args, {
+            const result = await client.run<CliInstallReport>(installArgs(next, folderId), {
                 id,
-                onProgress: (event) => {
-                    events.value = [...events.value, event].slice(-200)
-                },
+                onProgress: (event) => running.emit(event),
             })
-            report.value = result
+            running.finish(result)
             return true
         } catch (error) {
-            if (!cancelled.value) {
-                failure.value = toFailure(error)
+            if (cancelled.value) {
+                running.aborted()
+            } else {
+                running.abort(toFailure(error))
             }
             return false
         } finally {
             busy.value = false
             callId.value = ''
+            if (active === running) {
+                active = null
+            }
         }
+    }
+
+    /** 转后台：同一次调用，进度与结果改写到下载任务上，本页不再显示 */
+    function detach(): string | null {
+        const running = active
+        if (running === null || detached.value) {
+            return null
+        }
+        const adopted = useDownloadService().adopt({
+            id: running.id,
+            target: running.target,
+            folderId: running.folderId,
+            events: events.value,
+            startedAt: running.startedAt,
+        })
+        if (adopted === null) {
+            return null
+        }
+        running.emit = adopted.emit
+        running.finish = adopted.finish
+        running.abort = adopted.abort
+        running.aborted = adopted.aborted
+        detached.value = true
+        events.value = []
+        return running.id
     }
 
     /** 取消：杀掉正在跑的 CLI */
@@ -267,6 +307,7 @@ export const useInstallService = defineStore('InstallService', () => {
     }
 
     function close(): void {
+        detached.value = false
         busy.value = false
         events.value = []
         failure.value = null
@@ -282,18 +323,19 @@ export const useInstallService = defineStore('InstallService', () => {
         failure,
         report,
         cancelled,
+        detached,
         target,
         availableLoaders,
         availableWarnings,
         availableLoading,
         pendingLoaders,
         loadersFailure,
-        latest,
         running,
         loadAvailableLoaders,
         queryLoader,
         dropLoaderCache,
         start,
+        detach,
         cancel,
         close,
     }

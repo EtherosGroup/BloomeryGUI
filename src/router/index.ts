@@ -105,6 +105,14 @@ const routes = [
         },
     },
     {
+        path: '/download/version',
+        name: 'download-version',
+        component: () => import('@/views/download/DownloadVersionView.vue'),
+        meta: {
+            title: '安装任务',
+        },
+    },
+    {
         path: '/:pathMatch(.*)*',
         name: 'not-found',
         component: () => import('@/views/error/NotFoundView.vue'),

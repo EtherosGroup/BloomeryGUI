@@ -110,8 +110,6 @@ export const useModService = defineStore('ModService', () => {
     /** 进行中的调用 id，用于 killCli */
     const callId = ref('')
 
-    const latest = computed(() => installEvents.value[installEvents.value.length - 1] ?? null)
-
     const enabledCount = computed(() => files.value.filter((row) => row.enabled).length)
 
     /* ---------- api 门禁 ---------- */
@@ -421,7 +419,6 @@ export const useModService = defineStore('ModService', () => {
         mutationReport,
         mutationFailure,
         callId,
-        latest,
         enabledCount,
         checkApi,
         search,
