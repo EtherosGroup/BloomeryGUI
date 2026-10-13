@@ -5,6 +5,7 @@ import BackButton from '@/components/BackButton.vue'
 import CollapsibleGroup from '@/components/CollapsibleGroup.vue'
 import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
+import PopupWindow from '@/components/PopupWindow.vue'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
 import { ensureDirectory } from '@/api/files'
@@ -47,6 +48,8 @@ const globalJvmArgs = ref<string[]>([])
 const failure = ref<Failure | null>(null)
 const busy = ref(false)
 const editing = ref('')
+/** 移除版本的确认弹窗 */
+const removeOpen = ref(false)
 const draft = ref<string | number>('')
 
 /** 重命名草稿 */
@@ -203,6 +206,25 @@ function startRename(): void {
 }
 
 /** 写实例覆盖，成功后重读 */
+/** 移除版本：只从列表移除，磁盘文件不动 */
+async function confirmRemove(): Promise<void> {
+    removeOpen.value = false
+    const failure = await versionService.removeInstance(instanceId.value, folderId.value)
+    if (failure !== null) {
+        // 引擎没有这个动作时给可执行的提示
+        const unsupported = ['UnknownCommand', 'UsageError', 'NotImplemented', 'UnknownAction']
+        if (unsupported.includes(failure.code)) {
+            notifyError('引擎还不支持移除版本 · 到「环境配置」更新引擎')
+            return
+        }
+        const detail = failure.detail === null ? '' : ` · ${failure.detail}`
+        notifyError(`${errorSummary(failure.code, failure.message, failure.retryable)}${detail}`)
+        return
+    }
+    notifySuccess(`已移除 · ${instanceId.value}`)
+    void router.push('/version/list')
+}
+
 async function commit(): Promise<void> {
     // 数字输入框的 v-model 可能是 number，统一按字符串处理
     const value = String(draft.value ?? '').trim()
@@ -523,7 +545,25 @@ watch(instanceId, load)
                     config jvmArgs --folder {{ folderId || '<文件夹>' }} --instance {{ info.id }}
                 </p>
             </CollapsibleGroup>
+
+            <CollapsibleGroup label="移除">
+                <div class="setting__actions">
+                    <GroupButton variant="danger" :disabled="busy" @click="removeOpen = true">
+                        移除版本
+                    </GroupButton>
+                    <span class="setting__note">从版本列表移除，磁盘文件保留</span>
+                </div>
+            </CollapsibleGroup>
         </template>
+
+        <PopupWindow
+            v-model:open="removeOpen"
+            title="移除版本"
+            context="移除后磁盘文件保留"
+            :buttons="[{ label: '取消' }, { label: '移除', onClick: confirmRemove }]"
+        >
+            <p class="setting__note">{{ info?.name ?? instanceId }} · {{ folderId }}</p>
+        </PopupWindow>
     </main>
 </template>
 
@@ -623,5 +663,13 @@ watch(instanceId, load)
     font-size: var(--font-size-xs);
 
     word-break: break-all;
+}
+
+/* 危险动作那一行 */
+.setting__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
 }
 </style>

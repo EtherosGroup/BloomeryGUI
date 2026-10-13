@@ -287,6 +287,32 @@ export const useVersionService = defineStore('VersionService', () => {
         }
     }
 
+    /**
+     * 移除版本：只从列表移除，磁盘上的文件保留
+     *
+     * 返回 null 表示成功，失败给错误信封的内容；引擎没有这个动作时是 UnknownCommand
+     */
+    async function removeInstance(
+        instanceId: string,
+        folder: string,
+    ): Promise<VersionFailure | null> {
+        if (instanceId.length === 0) {
+            return { code: 'Unknown', message: '没有实例', detail: null, retryable: false }
+        }
+        const args = ['version', 'remove', instanceId]
+        if (folder.length > 0) {
+            args.push('--folder', folder)
+        }
+        try {
+            const client = await useCli().client()
+            await client.run(args, { progress: false })
+            await reloadAll()
+            return null
+        } catch (error) {
+            return toFailure(error)
+        }
+    }
+
     /** 启动实例：GUI 一律 --detach，不等游戏退出 */
     async function launch(
         instanceId: string,
@@ -346,6 +372,7 @@ export const useVersionService = defineStore('VersionService', () => {
         select,
         setCurrentFolder,
         addFolder,
+        removeInstance,
         launch,
     }
 })
