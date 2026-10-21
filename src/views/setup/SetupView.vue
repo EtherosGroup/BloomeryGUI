@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
-import { useEnvironmentCheckService, type EnvSituation } from '@/stores/EnvironmentCheckService'
+import Spinner from '@/components/Spinner.vue'
+import {
+    useEnvironmentCheckService,
+    type EnvSituation,
+    type UpdateOutcome,
+} from '@/stores/EnvironmentCheckService'
 import { useEnvironmentService } from '@/stores/EnvironmentService'
+import type { PopupWindowButton } from '@/types/PopupWindowButton'
+import { copyText } from '@/utils/clipboard'
+import { notifyError, notifySuccess } from '@/utils/notify'
 
 const router = useRouter()
 const env = useEnvironmentCheckService()
@@ -13,7 +21,9 @@ const environment = useEnvironmentService()
 
 /** 手动设置弹窗：node 给指引，bloomery 写路径 */
 /** 动作弹窗：确认、二选一、终端命令、结果 */
-const flow = ref<'' | 'node-confirm' | 'bloomery-choose' | 'linux-commands' | 'result'>('')
+const flow = ref<
+    '' | 'node-confirm' | 'bloomery-choose' | 'linux-commands' | 'updating' | 'result'
+>('')
 const flowTitle = ref('')
 const flowText = ref('')
 const busy = ref(false)
@@ -103,12 +113,7 @@ function actNode(): void {
 
 /** 点 Bloomery 的安装/更新 */
 function actBloomery(): void {
-    if (env.isLinux) {
-        flowTitle.value = '在终端执行'
-        flowText.value = env.linuxCommands.join('\n')
-        flow.value = 'linux-commands'
-        return
-    }
+    outcome.value = null
     if (env.pnpm.found) {
         flow.value = 'bloomery-choose'
         return
@@ -118,13 +123,19 @@ function actBloomery(): void {
 
 async function runNode(): Promise<void> {
     busy.value = true
-    flow.value = ''
+    outcome.value = null
+    flowTitle.value = '更新 Node.js'
+    flowText.value = '更新 Node.js'
+    flow.value = 'updating'
+    flowStartedAt.value = Date.now()
+    startTicker()
     try {
         flowText.value = await env.updateNode()
     } catch (error) {
         flowText.value = error instanceof Error ? error.message : String(error)
     } finally {
         busy.value = false
+        stopTicker()
         flowTitle.value = '结果'
         flow.value = 'result'
     }
@@ -132,16 +143,137 @@ async function runNode(): Promise<void> {
 
 async function runBloomery(manager: 'npm' | 'pnpm'): Promise<void> {
     busy.value = true
-    flow.value = ''
+    outcome.value = null
+    const verb = env.bloomery.found ? 'update' : 'install'
+    flowText.value = manager === 'pnpm' ? 'pnpm add -g bloomery' : `npm ${verb} -g bloomery`
+    flowTitle.value = '更新 Bloomery'
+    flow.value = 'updating'
+    flowStartedAt.value = Date.now()
+    startTicker()
     try {
-        flowText.value = await env.updateBloomery(manager)
+        outcome.value = await env.updateBloomery(manager)
     } catch (error) {
-        flowText.value = error instanceof Error ? error.message : String(error)
+        outcome.value = {
+            ok: false,
+            cancelled: false,
+            before: env.bloomery.version,
+            after: env.bloomery.version,
+            command: '',
+            tail: [],
+            error: error instanceof Error ? error.message : String(error),
+        }
     } finally {
         busy.value = false
+        stopTicker()
         flowTitle.value = '结果'
         flow.value = 'result'
     }
+}
+
+/** 最近一次 Bloomery 更新的结果；node 那条仍用 flowText */
+const outcome = ref<UpdateOutcome | null>(null)
+
+/* ---------- 更新中的秒针与输出 ---------- */
+
+const now = ref(Date.now())
+const flowStartedAt = ref(0)
+let ticker: number | undefined
+
+function startTicker(): void {
+    stopTicker()
+    now.value = Date.now()
+    ticker = window.setInterval(() => {
+        now.value = Date.now()
+    }, 1000)
+}
+
+function stopTicker(): void {
+    if (ticker !== undefined) {
+        window.clearInterval(ticker)
+        ticker = undefined
+    }
+}
+
+onBeforeUnmount(stopTicker)
+
+const updateElapsed = computed(() => {
+    if (flowStartedAt.value === 0) {
+        return 0
+    }
+    return Math.max(0, Math.round((now.value - flowStartedAt.value) / 1000))
+})
+
+/** 更新输出尾部，空时显示占位 */
+const updateTail = computed(() => env.updateLines.slice(-12).join('\n'))
+
+/** 结果摘要：版本变了给前后对比 */
+const outcomeText = computed(() => {
+    const result = outcome.value
+    if (result === null) {
+        return flowText.value
+    }
+    if (result.cancelled) {
+        return '已取消'
+    }
+    if (!result.ok) {
+        return `更新失败 · ${result.error}`
+    }
+    return result.before === result.after
+        ? `已是最新 · ${result.after}`
+        : `已更新 · ${result.before} → ${result.after}`
+})
+
+/** 弹窗按钮随流程变化 */
+const flowButtons = computed<PopupWindowButton[]>(() => {
+    switch (flow.value) {
+        // 长流程：不等待回调，按钮保持可用，弹窗留到用户关闭
+        case 'bloomery-choose':
+            return [
+                { label: '取消' },
+                { label: '用 pnpm', onClick: () => void runBloomery('pnpm'), closeOnClick: false },
+                { label: '用 npm', onClick: () => void runBloomery('npm'), closeOnClick: false },
+            ]
+        case 'node-confirm':
+            return [
+                { label: '取消' },
+                { label: '继续', onClick: () => void runNode(), closeOnClick: false },
+            ]
+        case 'updating':
+            return [{ label: '取消', onClick: abortUpdate, closeOnClick: false }]
+        case 'result':
+            return [
+                { label: '复制命令', onClick: copyResultCommand, closeOnClick: false },
+                { label: '知道了' },
+            ]
+        case 'linux-commands':
+            return [
+                { label: '复制命令', onClick: copyLinuxCommands, closeOnClick: false },
+                { label: '知道了' },
+            ]
+        default:
+            return [{ label: '知道了' }]
+    }
+})
+
+async function copyTextAndToast(text: string): Promise<void> {
+    const done = await copyText(text)
+    if (done) {
+        notifySuccess('已复制到剪贴板')
+        return
+    }
+    notifyError('复制失败')
+}
+
+function copyLinuxCommands(): void {
+    void copyTextAndToast(env.linuxCommands.join('\n'))
+}
+
+function copyResultCommand(): void {
+    void copyTextAndToast(outcome.value?.command ?? '')
+}
+
+function abortUpdate(): void {
+    void env.cancelUpdate()
 }
 
 function closeFlow(): void {
@@ -151,6 +283,10 @@ function closeFlow(): void {
 const flowOpen = computed({
     get: () => flow.value !== '',
     set: (value: boolean) => {
+        // 更新中拒绝关闭请求
+        if (!value && flow.value === 'updating') {
+            return
+        }
         if (!value) {
             closeFlow()
         }
@@ -208,24 +344,28 @@ onMounted(() => {
 
         <GroupButton class="setup__ok" @click="confirm">确定</GroupButton>
 
-        <PopupWindow
-            v-model:open="flowOpen"
-            :title="flowTitle"
-            :buttons="
-                flow === 'bloomery-choose'
-                    ? [
-                          { label: '取消' },
-                          { label: '用 pnpm', onClick: () => runBloomery('pnpm') },
-                          { label: '用 npm', onClick: () => runBloomery('npm') },
-                      ]
-                    : flow === 'node-confirm'
-                      ? [{ label: '取消' }, { label: '继续', onClick: runNode }]
-                      : [{ label: '知道了' }]
-            "
-        >
-            <pre v-if="flow === 'linux-commands' || flow === 'result'" class="setup__commands">{{
-                flowText
-            }}</pre>
+        <PopupWindow v-model:open="flowOpen" :title="flowTitle" :buttons="flowButtons">
+            <template v-if="flow === 'updating'">
+                <p class="setup__note setup__progress">
+                    <Spinner size="0.85rem" label="正在更新" />
+                    <span>已用 {{ updateElapsed }} 秒</span>
+                </p>
+                <p class="setup__note">命令 {{ flowText }}</p>
+                <pre class="setup__commands">{{ updateTail || '等待输出' }}</pre>
+            </template>
+            <template v-else-if="flow === 'result' && outcome !== null">
+                <p class="setup__note">{{ outcomeText }}</p>
+                <p v-if="outcome.command.length > 0" class="setup__note">
+                    命令 {{ outcome.command }}
+                </p>
+                <pre v-if="outcome.tail.length > 0" class="setup__commands">{{
+                    outcome.tail.join('\n')
+                }}</pre>
+            </template>
+            <pre
+                v-else-if="flow === 'linux-commands' || flow === 'result'"
+                class="setup__commands"
+                >{{ flowText }}</pre>
             <template v-else>
                 <p class="setup__note">{{ flowText }}</p>
                 <p v-if="flow === 'bloomery-choose' && npmNote.length > 0" class="setup__note">
@@ -324,6 +464,13 @@ onMounted(() => {
     display: flex;
     flex: 0 0 auto;
     gap: 0.5rem;
+}
+
+// 更新中秒针行
+.setup__progress {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 
 .setup__note {

@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { downloadFile, runProgram, systemFacts, type SystemFacts } from '@/api/program'
+import {
+    downloadFile,
+    killProgram,
+    runProgram,
+    runProgramStream,
+    systemFacts,
+    type SystemFacts,
+} from '@/api/program'
 import { openPath } from '@/api/system'
 
 /** Node.js 最低可用主版本 */
@@ -16,6 +23,22 @@ export interface ToolFact {
 }
 
 export type EnvSituation = 'no-node' | 'no-bloomery' | 'node-too-old' | 'bloomery-update' | 'ready'
+
+/** 一次更新的结果 */
+export interface UpdateOutcome {
+    ok: boolean
+    /** 被用户取消 */
+    cancelled: boolean
+    /** 更新前后的版本 */
+    before: string
+    after: string
+    /** 执行的命令 */
+    command: string
+    /** 输出尾部若干行 */
+    tail: string[]
+    /** 失败简述 */
+    error: string
+}
 
 const NODE_INDEX = 'https://nodejs.org/dist/index.json'
 const BLOOMERY_LATEST = 'https://registry.npmjs.org/bloomery/latest'
@@ -208,16 +231,87 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         return await installNode()
     }
 
-    /** 更新 Bloomery：有 pnpm 时命令由调用方选择 */
-    async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<string> {
-        const args = manager === 'pnpm' ? ['add', '-g', 'bloomery'] : ['update', '-g', 'bloomery']
-        const outcome = await runProgram(manager, args)
-        if (!outcome.spawned) {
-            return `${manager} 调用失败，可能未安装`
+    /* ---------- 更新流程：流式输出 + 可取消 ---------- */
+
+    /** 正在更新 */
+    const updating = ref(false)
+    /** 更新输出，保留尾部若干行 */
+    const updateLines = ref<string[]>([])
+    const UPDATE_LINE_LIMIT = 200
+
+    let updateId = ''
+    let updateCancelled = false
+
+    /** 更新 Bloomery：输出逐行回传，版本前后对比在结果里 */
+    async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<UpdateOutcome> {
+        // npm 的 update 对没装过的全局包会报错，未安装时改用 install
+        const verb = bloomery.value.found ? 'update' : 'install'
+        const args = manager === 'pnpm' ? ['add', '-g', 'bloomery'] : [verb, '-g', 'bloomery']
+        const command = `${manager} ${args.join(' ')}`
+        const before = bloomery.value.version
+
+        updating.value = true
+        updateCancelled = false
+        updateLines.value = []
+        updateId = `update-bloomery-${Date.now()}`
+
+        try {
+            const outcome = await runProgramStream(manager, args, {
+                id: updateId,
+                onLine: (line) => {
+                    const text = line.trim()
+                    if (text.length === 0) {
+                        return
+                    }
+                    updateLines.value = [...updateLines.value, text].slice(-UPDATE_LINE_LIMIT)
+                },
+            })
+            await check()
+            const tail = updateLines.value.slice(-12)
+            if (!outcome.spawned) {
+                return {
+                    ok: false,
+                    cancelled: false,
+                    before,
+                    after: bloomery.value.version,
+                    command,
+                    tail,
+                    error: `${manager} 调用失败，可能未安装`,
+                }
+            }
+            if (updateCancelled) {
+                return {
+                    ok: false,
+                    cancelled: true,
+                    before,
+                    after: bloomery.value.version,
+                    command,
+                    tail,
+                    error: '已取消',
+                }
+            }
+            return {
+                ok: outcome.code === 0,
+                cancelled: false,
+                before,
+                after: bloomery.value.version,
+                command,
+                tail,
+                error: outcome.code === 0 ? '' : `${command} 退出码 ${outcome.code ?? '未知'}`,
+            }
+        } finally {
+            updating.value = false
+            updateId = ''
         }
-        const text = (outcome.stdout + outcome.stderr).trim()
-        await check()
-        return text.length > 0 ? text.slice(0, 800) : `${manager} ${args.join(' ')} 已完成`
+    }
+
+    /** 取消进行中的更新 */
+    async function cancelUpdate(): Promise<void> {
+        if (updateId.length === 0) {
+            return
+        }
+        updateCancelled = true
+        await killProgram(updateId).catch(() => undefined)
     }
 
     return {
@@ -231,7 +325,6 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         nodeInstaller,
         installNode,
         updateNode,
-        updateBloomery,
         node,
         bloomery,
         nvm,
@@ -242,6 +335,10 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         nodeOutdated,
         bloomeryOutdated,
         usable,
+        updating,
+        updateLines,
+        updateBloomery,
+        cancelUpdate,
         check,
     }
 })
