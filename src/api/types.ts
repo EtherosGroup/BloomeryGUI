@@ -267,7 +267,7 @@ export interface CliInstallReport {
     name: string
     versionId: string
     loader: { name: string; version: string } | null
-    /** 加载器要的基础版本是本来就有，还是这次顺带装的 */
+    /** 加载器需要的基础版本已存在，还是随本次安装引入 */
     base: 'none' | 'present' | 'installed'
     clientJar: boolean
     libraries: CliDownloadReport
@@ -289,6 +289,8 @@ export interface CliModHit {
     id: string
     slug: string
     title: string
+    /** 中文名，来自引擎缓存的中文名表；没有则为 null 或缺失 */
+    titleZh?: string | null
     description: string
     downloads: number
     loaders: string[]
@@ -320,17 +322,43 @@ export interface CliModFile {
     enabled: boolean
     /** 反查成功才为 true；false 时 project 与 version 均为 null，字段本身在 */
     resolved: boolean
-    project: { id: string; slug: string; title: string } | null
+    project: {
+        id: string
+        slug: string
+        title: string
+        /** 中文名，来自引擎缓存的中文名表；没有则为 null 或缺失 */
+        titleZh?: string | null
+    } | null
     version: { id: string; number: string; type: string } | null
 }
 
 /** mod list 结果 */
+/** mod list 反查阶段的逐条元数据帧，比进度事件多一个文件的元数据 */
+export interface CliModItemFrame {
+    v: number
+    key: 'mod-item'
+    /** 文件名，含 .jar.disabled */
+    file: string
+    project: CliModFile['project']
+    version: CliModFile['version']
+}
+
+/** 中文名表的缓存状态，引擎给了才有 */
+export interface CliNamesMeta {
+    path?: string
+    /** RFC3339 */
+    updatedAt?: string
+    source?: string
+    count?: number
+}
+
 export interface CliModList {
     v: number
     instance: string
     /** 实例的 mods 目录绝对路径 */
     mods: string
     files: CliModFile[]
+    names?: CliNamesMeta
 }
 
 /** 改名条目 */
@@ -429,19 +457,66 @@ export interface CliRemovedList {
     versions: CliRemovedInstance[]
 }
 
-/** 下载队列里的任务，--async 才有 */
-export interface CliModTask {
+/* ---------- 下载队列：文件即队列，进程重启后还在 ---------- */
+
+/** 队列任务状态 */
+export type CliTaskState = 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
+
+/** mod install 任务的入队参数，路径与版本在入队时定死 */
+export interface CliModInstallParams {
+    query: string
+    modsDirectory: string
+    gameVersion: string | null
+    loader: string | null
+    withDependencies: boolean
+    dryRun: boolean
+}
+
+/** 队列里的进度快照，每秒写一次 */
+export interface CliTaskProgress {
+    stage: string
+    done: number
+    total: number
+    bytes: boolean
+    /** RFC3339 UTC */
+    at: string
+}
+
+export interface CliTaskError {
+    code: string
+    message: string
+    detail: string
+    retryable: boolean
+}
+
+/** 一个队列任务 */
+export interface CliDownloadTask {
     id: string
     type: string
+    /** 装什么，MOD 任务的 target 是项目标识 */
     target: string
-    state: string
-    progress: unknown
+    state: CliTaskState
+    params: CliModInstallParams
+    attempts: number
+    /** RFC3339 UTC */
+    created: string
+    started: string | null
+    finished: string | null
+    progress: CliTaskProgress | null
+    error: CliTaskError | null
+}
+
+/** download info 结果；worker 是后台下载进程的 pid，没有则为 null */
+export interface CliDownloadQueue {
+    v: number
+    worker: number | null
+    tasks: CliDownloadTask[]
 }
 
 /** mod install --async 结果 */
 export interface CliModAsyncResult {
     v: number
     instance: string
-    tasks: CliModTask[]
+    tasks: CliDownloadTask[]
     spawn: { outcome: string; pid: number | null; log: string | null }
 }

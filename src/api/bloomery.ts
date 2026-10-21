@@ -3,6 +3,7 @@ import {
     PROGRESS_KEYS,
     type CliErrorEnvelope,
     type CliErrorPayload,
+    type CliModItemFrame,
     type CliProgressEvent,
     type CliVersionInfo,
     type ProgressKey,
@@ -51,6 +52,8 @@ export interface CliRunOptions {
     /** 输出为多行 NDJSON 时跳过整体 JSON 解析，直接返回原始 stdout */
     raw?: boolean
     onProgress?: (event: CliProgressEvent) => void
+    /** mod list 反查的逐条元数据帧，比进度事件多带一个文件的元数据 */
+    onItem?: (frame: CliModItemFrame) => void
     /** 探活一类不需要进度的调用传 false */
     progress?: boolean
     /**
@@ -133,6 +136,23 @@ export function parseProgressLine(line: string): CliProgressEvent | null {
     }
 }
 
+/** 逐条元数据帧解析，其余行返回 null */
+export function parseItemFrame(line: string): CliModItemFrame | null {
+    const text = line.trim()
+    if (!text.startsWith('{')) {
+        return null
+    }
+    try {
+        const value = JSON.parse(text) as Partial<CliModItemFrame>
+        if (value.key !== 'mod-item' || typeof value.file !== 'string') {
+            return null
+        }
+        return { ...(value as CliModItemFrame) }
+    } catch {
+        return null
+    }
+}
+
 /** api 兼容判断：缺失或低于要求即不兼容 */
 export function meetsApi(info: CliVersionInfo, required: number): boolean {
     return typeof info.api === 'number' && info.api >= required
@@ -202,6 +222,7 @@ export class BloomeryClient {
     /** 跑一条命令，返回 --json 的结果对象 */
     async run<T>(command: string[], options: CliRunOptions = {}): Promise<T> {
         const onProgress = options.onProgress
+        const onItem = options.onItem
         const args = buildCliArgs(this.home, command, options.progress ?? true)
 
         let result: CliProcessResult
@@ -213,6 +234,13 @@ export class BloomeryClient {
                 // 原始 stderr 与进度解析共用一个回调，两者都要
                 onStderrLine: (line) => {
                     options.onStderrLine?.(line)
+                    if (onItem) {
+                        const frame = parseItemFrame(line)
+                        if (frame !== null) {
+                            onItem(frame)
+                            return
+                        }
+                    }
                     if (onProgress) {
                         const event = parseProgressLine(line)
                         if (event) {

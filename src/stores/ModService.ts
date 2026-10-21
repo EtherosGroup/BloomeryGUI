@@ -5,10 +5,12 @@ import { killCli } from '@/api/transport.tauri'
 import {
     MOD_API_REQUIRED,
     type CliModFile,
+    type CliModItemFrame,
     type CliModInstallResult,
     type CliModList,
     type CliModMutation,
     type CliModSearch,
+    type CliNamesMeta,
     type CliProgressEvent,
 } from '@/api/types'
 import {
@@ -32,7 +34,7 @@ export interface ModFailure {
     code: string
     message: string
     detail: string | null
-    /** 来自错误信封，可重试才有意义 */
+    /** 来自错误信封 */
     retryable: boolean
 }
 
@@ -91,6 +93,8 @@ export const useModService = defineStore('ModService', () => {
     const listScope = ref<ModScope | null>(null)
 
     const listCache = ref<Record<string, { mods: string; files: CliModFile[] }>>({})
+    /** 中文名表缓存信息，引擎给了才有 */
+    const namesMeta = ref<CliNamesMeta | null>(null)
     let listSeq = 0
 
     /* ---------- 安装 ---------- */
@@ -194,7 +198,10 @@ export const useModService = defineStore('ModService', () => {
      * 两段式：先 --offline 拿本地扫描结果把列表铺出来，再联网反查 sha1 补项目名
      * 反查失败只走 resolved=false 的降级，不影响本地那份
      */
-    async function loadList(scope: ModScope, options: { force?: boolean } = {}): Promise<void> {
+    async function loadList(
+        scope: ModScope,
+        options: { force?: boolean; refreshNames?: boolean } = {},
+    ): Promise<void> {
         if (!supported.value || scope.instanceId.length === 0) {
             return
         }
@@ -215,7 +222,6 @@ export const useModService = defineStore('ModService', () => {
         listResolving.value = false
         resolveProgress.value = null
 
-        const args = listArgs(scope)
         const client = await useCli()
             .client()
             .catch((error: unknown) => {
@@ -228,7 +234,7 @@ export const useModService = defineStore('ModService', () => {
         }
 
         try {
-            const offline = await client.run<CliModList>(listArgs(scope, true), {
+            const offline = await client.run<CliModList>(listArgs(scope, { offline: true }), {
                 progress: false,
             })
             if (seq !== listSeq) {
@@ -253,21 +259,43 @@ export const useModService = defineStore('ModService', () => {
 
         // 第二段：反查慢，回来就替换；失败保留第一段结果
         listResolving.value = true
+        const onProgress = (event: CliProgressEvent): void => {
+            if (seq === listSeq && event.key === 'mod') {
+                resolveProgress.value = { done: event.done, total: event.total }
+            }
+        }
+        // 逐条帧：到达即渲染，整批结果最后覆盖
+        const onItem = (frame: CliModItemFrame): void => {
+            if (seq === listSeq) {
+                patchRow(frame.file, frame.project ?? null, frame.version ?? null)
+            }
+        }
         try {
-            const resolved = await client.run<CliModList>(args, {
-                progress: true,
-                onProgress: (event) => {
-                    if (seq === listSeq && event.key === 'mod') {
-                        resolveProgress.value = { done: event.done, total: event.total }
-                    }
-                },
-            })
+            let resolved: CliModList
+            try {
+                resolved = await client.run<CliModList>(
+                    listArgs(scope, { refreshNames: options.refreshNames }),
+                    { progress: true, onProgress, onItem },
+                )
+            } catch (error) {
+                // 老版本引擎不认 --refresh-names：退回普通刷新
+                if (options.refreshNames === true && unsupportedFlag(error)) {
+                    resolved = await client.run<CliModList>(listArgs(scope), {
+                        progress: true,
+                        onProgress,
+                        onItem,
+                    })
+                } else {
+                    throw error
+                }
+            }
             if (seq !== listSeq) {
                 return
             }
             const rows = Array.isArray(resolved.files) ? resolved.files : []
             modsPath.value = resolved.mods
             files.value = rows
+            namesMeta.value = resolved.names ?? null
             listCache.value = { ...listCache.value, [key]: { mods: resolved.mods, files: rows } }
         } catch {
             // 反查整条挂掉时第一段结果仍然可用，不覆盖 failure
@@ -277,6 +305,34 @@ export const useModService = defineStore('ModService', () => {
                 resolveProgress.value = null
             }
         }
+    }
+
+    /** 逐条帧：按文件名替换那一行，缺失忽略 */
+    function patchRow(
+        file: string,
+        project: CliModFile['project'],
+        version: CliModFile['version'],
+    ): void {
+        const index = files.value.findIndex((row) => row.filename === file)
+        if (index < 0) {
+            return
+        }
+        const next = files.value.slice()
+        next[index] = {
+            ...next[index],
+            resolved: project !== null && version !== null,
+            project,
+            version,
+        }
+        files.value = next
+    }
+
+    /** 引擎不支持该开关 */
+    function unsupportedFlag(error: unknown): boolean {
+        return (
+            error instanceof BloomeryError &&
+            (error.code === 'UsageError' || error.code === 'UnknownCommand')
+        )
     }
 
     /** 写操作之后重取：只有这个实例取过才重取，没取过就不惊动网络 */
@@ -323,7 +379,8 @@ export const useModService = defineStore('ModService', () => {
                 },
             })
             installReport.value = result
-            await refreshAfterWrite(scope)
+            installBusy.value = false
+            void refreshAfterWrite(scope).catch(() => undefined)
             return true
         } catch (error) {
             if (!installCancelled.value) {
@@ -362,7 +419,9 @@ export const useModService = defineStore('ModService', () => {
                 progress: false,
             })
             mutationReport.value = result
-            await refreshAfterWrite(scope)
+            // 命令结束即放开交互；刷新内含在线反查，会压住禁用状态
+            mutating.value = false
+            void refreshAfterWrite(scope).catch(() => undefined)
             return true
         } catch (error) {
             if (!installCancelled.value) {
@@ -410,6 +469,7 @@ export const useModService = defineStore('ModService', () => {
         listFailure,
         resolveProgress,
         listScope,
+        namesMeta,
         installBusy,
         installEvents,
         installReport,

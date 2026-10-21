@@ -11,12 +11,14 @@ import ModProgress from '@/views/mod/ModProgress.vue'
 import { errorSummary } from '@/api/errorMessages'
 import { openPath } from '@/api/system'
 import { MOD_API_REQUIRED, type CliModHit } from '@/api/types'
+import { useModDownloadService } from '@/stores/ModDownloadService'
 import { useModService } from '@/stores/ModService'
 import { useModTarget } from '@/composables/useModTarget'
 import { notifyError, notifySuccess } from '@/utils/notify'
 import { downloadsText, gameText, loaderText } from '@/utils/modText'
 
 const mod = useModService()
+const queue = useModDownloadService()
 const router = useRouter()
 const {
     folderId,
@@ -128,6 +130,25 @@ async function startInstall(): Promise<void> {
         return
     }
     notifySuccess(`已安装 · ${hit.title}`)
+}
+
+/** 入队：交给 CLI 的后台下载进程，进度在下载队列页看 */
+async function enqueue(): Promise<void> {
+    const current = scope.value
+    const hit = selected.value
+    if (current === null || hit === null || !canInstall.value) {
+        return
+    }
+    const ids = await queue.enqueue(current, [hit.slug], deps.value)
+    if (ids === null) {
+        const failure = queue.failure
+        if (failure !== null) {
+            notifyError(errorSummary(failure.code, failure.message, failure.retryable))
+        }
+        return
+    }
+    notifySuccess('已加入下载队列')
+    void router.push('/download/mod')
 }
 
 async function cancel(): Promise<void> {
@@ -315,6 +336,9 @@ onMounted(boot)
                     </GroupButton>
                     <GroupButton v-if="mod.installBusy" variant="ghost" @click="cancel">
                         取消
+                    </GroupButton>
+                    <GroupButton v-else variant="ghost" :disabled="!canInstall" @click="enqueue">
+                        加入下载队列
                     </GroupButton>
                 </div>
             </template>

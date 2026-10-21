@@ -12,12 +12,15 @@ import { errorSummary } from '@/api/errorMessages'
 import { openPath } from '@/api/system'
 import { MOD_API_REQUIRED, type CliModFile } from '@/api/types'
 import type { ModAction } from '@/stores/ModService'
+import { useModDownloadService } from '@/stores/ModDownloadService'
 import { useModService } from '@/stores/ModService'
 import { useModTarget } from '@/composables/useModTarget'
 import { notifyError, notifySuccess } from '@/utils/notify'
+import { versionTypeLabel } from '@/utils/versionLabel'
 import { downloadsText, gameText, loaderText, sizeText, skipLabel } from '@/utils/modText'
 
 const mod = useModService()
+const queue = useModDownloadService()
 const router = useRouter()
 const {
     folderId,
@@ -175,6 +178,25 @@ async function startInstall(): Promise<void> {
 }
 
 /** 删除 / 禁用 / 启用都走同一条通道，结果里带改了哪些、跳过哪些 */
+/** 入队：整批交给 CLI 的后台下载进程 */
+async function enqueue(): Promise<void> {
+    const current = scope.value
+    if (current === null || wanted.value.length === 0 || !canInstall.value) {
+        return
+    }
+    const ids = await queue.enqueue(current, [...wanted.value], deps.value)
+    if (ids === null) {
+        const failure = queue.failure
+        if (failure !== null) {
+            notifyError(errorSummary(failure.code, failure.message, failure.retryable))
+        }
+        return
+    }
+    wanted.value = []
+    notifySuccess(`已加入下载队列 ${ids.length} 个`)
+    void router.push('/download/mod')
+}
+
 async function act(action: ModAction): Promise<void> {
     const current = scope.value
     if (current === null || chosen.value.length === 0) {
@@ -200,6 +222,35 @@ async function act(action: ModAction): Promise<void> {
     notifySuccess(`已处理 ${changed} 个`)
 }
 
+/** 重取云端元数据：丢内存缓存并强刷中文名表 */
+async function reloadCloud(): Promise<void> {
+    const current = scope.value
+    if (current === null || mod.listLoading || mod.listResolving) {
+        return
+    }
+    await mod.loadList(current, { force: true, refreshNames: true })
+}
+
+/** 中文名表的缓存状态，引擎给了才有 */
+const namesText = computed(() => {
+    const meta = mod.namesMeta
+    if (meta === null) {
+        return ''
+    }
+    const parts: string[] = []
+    // 表未托管时 count 为 0，隐藏该段
+    if (typeof meta.count === 'number' && meta.count > 0) {
+        parts.push(`${meta.count} 个中文名`)
+    }
+    if (typeof meta.updatedAt === 'string') {
+        const at = new Date(meta.updatedAt)
+        if (!Number.isNaN(at.getTime())) {
+            parts.push(`更新于 ${at.toLocaleString()}`)
+        }
+    }
+    return parts.join(' · ')
+})
+
 async function openMods(): Promise<void> {
     if (modsPathEmpty.value) {
         return
@@ -212,15 +263,45 @@ function toSingle(): void {
 }
 
 /** 反查成功的用项目名，没反查到就退回文件名 */
-function titleOf(row: CliModFile): string {
-    return row.project === null ? row.filename : row.project.title
+/** 文件名前缀里的方括号名 */
+const BRACKET_NAME = /^[\[【]([^\]】]+)[\]】]\s*/
+
+function bracketNameOf(filename: string): string | null {
+    const match = BRACKET_NAME.exec(filename)
+    return match === null ? null : match[1].trim()
 }
 
-function subtitleOf(row: CliModFile): string {
-    if (row.project === null || row.version === null) {
-        return `${row.filename} · 未反查到项目`
+/** 去掉方括号名与扩展名的剩余部分 */
+function bareNameOf(filename: string): string {
+    const rest = filename.replace(BRACKET_NAME, '').replace(/\.jar(\.disabled)?$/i, '')
+    return rest.length > 0 ? rest : filename
+}
+
+/** 中文名：中文名表优先，其次文件名方括号 */
+function chineseNameOf(row: CliModFile): string | null {
+    const fromTable = row.project?.titleZh ?? null
+    if (fromTable !== null && fromTable.trim().length > 0) {
+        return fromTable.trim()
     }
-    return `${row.project.slug} · ${row.version.number} · ${row.version.type}`
+    return bracketNameOf(row.filename)
+}
+
+/** 第一行：中文名，其次项目名，最后文件名 */
+function titleOf(row: CliModFile): string {
+    return chineseNameOf(row) ?? row.project?.title ?? bareNameOf(row.filename)
+}
+
+/** 第二行：[英文名] · 版本 · 类型；与第一行同名时省略方括号 */
+function subtitleOf(row: CliModFile): string {
+    const english = row.project?.title ?? bareNameOf(row.filename)
+    const parts: string[] = []
+    if (english !== titleOf(row)) {
+        parts.push(`[${english}]`)
+    }
+    if (row.version !== null) {
+        parts.push(row.version.number, versionTypeLabel(row.version.type))
+    }
+    return parts.join(' · ')
 }
 
 function changeText(row: { from: string; to: string | null }): string {
@@ -332,6 +413,20 @@ onMounted(boot)
             </p>
 
             <template v-else>
+                <div class="mod__cloud">
+                    <span class="mod__note">
+                        Bloomery 缓存元数据结果，重新加载获取最新
+                        <template v-if="namesText.length > 0"> · {{ namesText }}</template>
+                    </span>
+                    <GroupButton
+                        variant="ghost"
+                        :disabled="mod.listLoading || mod.listResolving"
+                        @click="reloadCloud"
+                    >
+                        重新加载云端元数据
+                    </GroupButton>
+                </div>
+
                 <p class="mod__note">
                     已装 {{ mod.files.length }} 个 · 启用 {{ mod.enabledCount }} 个 · 禁用
                     {{ disabledCount }} 个{{
@@ -359,11 +454,15 @@ onMounted(boot)
                         </span>
                     </div>
 
-                    <ul class="mod__list">
+                    <ul class="mod__list mod__list--tall">
                         <li v-for="row in mod.files" :key="row.filename">
                             <label
                                 class="mod__row mod__pick"
-                                :class="{ 'mod__row--on': chosen.includes(row.filename) }"
+                                :title="row.filename"
+                                :class="{
+                                    'mod__row--on': chosen.includes(row.filename),
+                                    'mod__row--busy': mod.mutating,
+                                }"
                             >
                                 <input
                                     class="mod__check"
@@ -372,15 +471,22 @@ onMounted(boot)
                                     :disabled="mod.mutating"
                                     @change="toggleFile(row.filename)"
                                 />
-                                <span class="mod__row-head">
+                                <span class="mod__pick-body">
                                     <span class="mod__row-title">{{ titleOf(row) }}</span>
-                                    <span class="mod__tag">{{
-                                        row.enabled ? '启用' : '禁用'
-                                    }}</span>
-                                    <span class="mod__tag">{{ sizeText(row.size) }}</span>
-                                    <span v-if="!row.resolved" class="mod__row-meta">未反查</span>
+                                    <span v-if="subtitleOf(row).length > 0" class="mod__row-desc">
+                                        {{ subtitleOf(row) }}
+                                    </span>
+                                    <span class="mod__row-tags">
+                                        <span
+                                            class="mod__tag"
+                                            :class="{ 'mod__tag--off': !row.enabled }"
+                                        >
+                                            {{ row.enabled ? '启用' : '禁用' }}
+                                        </span>
+                                        <span class="mod__tag">{{ sizeText(row.size) }}</span>
+                                        <span v-if="!row.resolved" class="mod__tag">未反查</span>
+                                    </span>
                                 </span>
-                                <span class="mod__row-desc">{{ subtitleOf(row) }}</span>
                             </label>
                         </li>
                     </ul>
@@ -528,6 +634,9 @@ onMounted(boot)
                     <GroupButton v-if="mod.installBusy" variant="ghost" @click="mod.cancel">
                         取消
                     </GroupButton>
+                    <GroupButton v-else variant="ghost" :disabled="!canInstall" @click="enqueue">
+                        加入下载队列
+                    </GroupButton>
                     <GroupButton variant="ghost" @click="toSingle">单装一个</GroupButton>
                 </div>
             </template>
@@ -539,6 +648,11 @@ onMounted(boot)
 
 <style scoped lang="scss">
 @use './mod-page.scss';
+
+// 已装列表一屏更高
+.mod__list--tall {
+    max-height: 40rem;
+}
 
 .mod__toolbar {
     display: flex;
@@ -552,6 +666,36 @@ onMounted(boot)
     flex-direction: row;
     align-items: flex-start;
     gap: 0.6rem;
+}
+
+// 云端元数据行：小字在左，按钮在右
+.mod__cloud {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+// 命令运行中，行不可点
+.mod__row--busy {
+    cursor: default;
+    opacity: 0.6;
+}
+
+// 复选框右侧一列
+.mod__pick-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.2rem;
+
+    min-width: 0;
+}
+
+// 禁用标签，随主题明暗调整
+.mod__tag--off {
+    color: color-mix(in srgb, #c62828 78%, var(--text-color));
 }
 
 .mod__check {

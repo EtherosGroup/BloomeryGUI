@@ -116,6 +116,14 @@ const routes = [
         },
     },
     {
+        path: '/download/mod',
+        name: 'download-mod',
+        component: () => import('@/views/download/DownloadModView.vue'),
+        meta: {
+            title: 'MOD 下载队列',
+        },
+    },
+    {
         path: '/:pathMatch(.*)*',
         name: 'not-found',
         component: () => import('@/views/error/NotFoundView.vue'),
