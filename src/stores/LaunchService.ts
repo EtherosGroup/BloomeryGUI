@@ -42,6 +42,8 @@ export const useLaunchService = defineStore(
     () => {
         /** 不再询问，直接启动 */
         const skipConfirm = ref(false)
+        /** 托盘菜单点了「启动游戏」：首页取走并走启动流程 */
+        const trayLaunchPending = ref(false)
         /** dry-run 得到的启动计划，用于确认弹窗 */
         const plan = ref<CliLaunchResult | null>(null)
         /** 正在启动的实例 */
@@ -435,8 +437,23 @@ export const useLaunchService = defineStore(
             skipConfirm.value = value
         }
 
+        /** 托盘菜单点了「启动游戏」 */
+        function requestFromTray(): void {
+            trayLaunchPending.value = true
+        }
+
+        /** 取走托盘启动请求：取到就清掉，避免换页重挂后重复启动 */
+        function consumeTrayLaunch(): boolean {
+            if (!trayLaunchPending.value) {
+                return false
+            }
+            trayLaunchPending.value = false
+            return true
+        }
+
         return {
             skipConfirm,
+            trayLaunchPending,
             plan,
             instance,
             folder,
@@ -461,6 +478,8 @@ export const useLaunchService = defineStore(
             cancel,
             close,
             setSkipConfirm,
+            requestFromTray,
+            consumeTrayLaunch,
         }
     },
     {

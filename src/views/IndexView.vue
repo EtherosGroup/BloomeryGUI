@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
 import { useCli } from '@/composables/useCli'
@@ -190,6 +190,17 @@ onMounted(async () => {
     }
     await versionService.load()
 })
+
+/** 托盘菜单的启动请求：取走一次走一次，离开首页再回来不会重复启动 */
+watch(
+    () => launchService.trayLaunchPending,
+    (pending) => {
+        if (pending && launchService.consumeTrayLaunch()) {
+            void requestLaunch()
+        }
+    },
+    { immediate: true },
+)
 </script>
 
 <template>
@@ -276,14 +287,16 @@ onMounted(async () => {
     display: flex;
     flex-direction: row;
     align-items: stretch;
+    flex-wrap: wrap;
     gap: 0.5rem;
 
-    width: 15%;
-    height: 10%;
+    /* 宽度随视口收窄但不低于可读宽度；高度交给内容，窄窗矮窗都不会溢出错版 */
+    width: clamp(14rem, 15%, 24rem);
+    max-width: calc(100% - 2rem);
 
     &__main {
         display: flex;
-        flex: 1;
+        flex: 1 1 8rem;
         align-self: stretch;
         min-width: 0;
         flex-direction: column;
@@ -303,6 +316,7 @@ onMounted(async () => {
 
 .quick-start__busy {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
@@ -311,5 +325,7 @@ onMounted(async () => {
 
     color: var(--text-color-dark);
     font-size: var(--font-size-xs);
+    line-height: 1.4;
+    text-align: center;
 }
 </style>

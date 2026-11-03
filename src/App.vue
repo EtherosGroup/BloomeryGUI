@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterView } from 'vue-router'
+import { listen } from '@tauri-apps/api/event'
 import LoadingPage from '@/components/LoadingPage.vue'
 import NavComponent from '@/components/NavComponent.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEnvironmentCheckService } from '@/stores/EnvironmentCheckService'
+import { useLaunchService } from '@/stores/LaunchService'
 
 // 启动页最短展示时长
 const LOADING_PAGE_MIN_DURATION = 800
@@ -19,7 +21,23 @@ const route = useRoute()
 /** 当前页面是否不铺背景图 */
 const plainBackground = computed(() => route.meta.plainBackground === true)
 const env = useEnvironmentCheckService()
+const launchService = useLaunchService()
 const mountedAt = performance.now()
+
+/** 托盘图标与菜单事件：隐藏窗口时不销毁 webview，事件照常送达 */
+let unlistenTray: (() => void) | undefined
+
+onBeforeUnmount(() => {
+    unlistenTray?.()
+})
+
+/** 托盘「启动游戏」：回首页再把请求交给首页，若停在别的页面先切回去 */
+async function handleTrayLaunch(): Promise<void> {
+    if (router.currentRoute.value.path !== '/') {
+        await router.replace('/')
+    }
+    launchService.requestFromTray()
+}
 
 onMounted(async () => {
     // 全局字体 7.4MB，就绪后淡出
@@ -40,6 +58,15 @@ onMounted(async () => {
     await probing
     if (!env.usable && router.currentRoute.value.path !== '/setup') {
         await router.replace('/setup')
+    }
+
+    // 托盘菜单事件：只在 Tauri 里存在，浏览器直开时静默跳过
+    try {
+        unlistenTray = await listen('tray://launch', () => {
+            void handleTrayLaunch()
+        })
+    } catch {
+        unlistenTray = undefined
     }
 })
 </script>

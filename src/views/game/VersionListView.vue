@@ -8,9 +8,11 @@ import Spinner from '@/components/Spinner.vue'
 import GroupButton from '@/components/GroupButton.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
+import ImportHmclDialog from '@/components/ImportHmclDialog.vue'
 import PopupMenu from '@/components/PopupMenu.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import { useVersionService, type RemovedInstance } from '@/stores/VersionService'
+import { useAccountService } from '@/stores/AccountService'
 import { errorSummary } from '@/api/errorMessages'
 import type { CliFolder, CliInstance, CliLaunchResult } from '@/api/types'
 import { useLaunchService } from '@/stores/LaunchService'
@@ -25,8 +27,12 @@ import {
 import { notifyError, notifySuccess } from '@/utils/notify'
 
 const versionService = useVersionService()
+const accountService = useAccountService()
 const launchService = useLaunchService()
 const router = useRouter()
+
+/** 导入 HMCL 数据弹窗 */
+const importOpen = ref(false)
 
 const keyword = ref('')
 /** 每个文件夹的展开状态，展开时懒加载 */
@@ -131,6 +137,13 @@ function selectedOf(folder: CliFolder): string | null {
 async function refresh(): Promise<void> {
     await versionService.reloadAll()
     await loadRemoved()
+}
+
+/** 导入 HMCL 数据后：文件夹、实例、账号都要重取 */
+async function afterImport(): Promise<void> {
+    await refresh()
+    await accountService.load()
+    notifySuccess('已导入 HMCL 数据')
 }
 
 async function setCurrent(folder: CliFolder): Promise<void> {
@@ -334,6 +347,7 @@ onMounted(async () => {
         <header class="versions__head">
             <h1 class="versions__title">版本列表</h1>
             <div class="versions__actions">
+                <GroupButton variant="ghost" @click="importOpen = true">导入 HMCL</GroupButton>
                 <GroupButton
                     variant="ghost"
                     :disabled="versionService.foldersLoading"
@@ -585,6 +599,8 @@ onMounted(async () => {
                 />
             </div>
         </PopupWindow>
+
+        <ImportHmclDialog v-model:open="importOpen" @imported="afterImport" />
 
         <CollapsibleGroup v-if="removedRows.length > 0" label="已移除的版本">
             <p class="versions__note">挪进文件夹下的 .removed，磁盘文件保留</p>

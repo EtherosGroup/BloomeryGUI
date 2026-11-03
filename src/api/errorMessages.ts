@@ -32,6 +32,7 @@ const ERROR_LABEL: Record<string, string> = {
     MicrosoftNotOwned: '这个微软账户没有 Minecraft: Java Edition',
     ModNotFound: '没找到这个 MOD',
     ModUnsupported: '这个实例装不了这个 MOD',
+    ImportUnrecognized: '无法识别的导入数据',
     LaunchFailed: '游戏进程没起来',
 }
 

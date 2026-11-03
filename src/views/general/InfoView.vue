@@ -20,6 +20,7 @@ const info = ref<CliVersionInfo | null>(null)
 const status = ref<CliStatus | null>(null)
 const failure = ref<Failure | null>(null)
 const busy = ref(false)
+const scanning = ref(false)
 
 const platform = computed(() => status.value?.host.platform.toLowerCase() ?? '')
 const javaDefault = computed(() => status.value?.javaDefault ?? null)
@@ -49,6 +50,27 @@ async function openDirectory(path: string): Promise<void> {
         await openPath(path)
     } catch (error) {
         failure.value = { code: 'OpenFailed', message: '无法打开路径', detail: String(error) }
+    }
+}
+
+/** 扫描本机 Java：CLI 写 setting.json 的 java.list，扫完重取 status */
+async function scanJava(): Promise<void> {
+    if (scanning.value) {
+        return
+    }
+    scanning.value = true
+    failure.value = null
+    try {
+        const bloomery = await client()
+        await bloomery.run(['java', 'scan'], { progress: false })
+        status.value = await bloomery.run<CliStatus>(['status'], { progress: false })
+    } catch (error) {
+        failure.value =
+            error instanceof BloomeryError
+                ? { code: error.code, message: error.message, detail: error.detail }
+                : { code: 'Unknown', message: String(error), detail: null }
+    } finally {
+        scanning.value = false
     }
 }
 
@@ -145,6 +167,11 @@ onMounted(refresh)
                         <span v-if="!item.usable" class="setup__tag">不可用</span>
                     </li>
                 </ul>
+                <div class="setup__actions">
+                    <GroupButton variant="ghost" :disabled="scanning" @click="scanJava">
+                        {{ scanning ? '扫描中' : '扫描 Java' }}
+                    </GroupButton>
+                </div>
             </CollapsibleGroup>
 
             <CollapsibleGroup label="文件夹">

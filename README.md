@@ -30,6 +30,12 @@ pnpm dev          # 只起前端，端口 1420（predev 会先清掉占用端口
 pnpm tauri dev    # 起完整桌面应用（devUrl 固定 http://localhost:1420）
 ```
 
+## 窗口与托盘
+
+关闭窗口不退出应用：窗口隐藏到系统托盘，托盘菜单给「显示主界面 / 启动游戏 / 退出」，
+双击托盘图标回到主界面（Linux 上 appindicator 不派发点击事件，用菜单）。
+托盘图标沿用应用图标；Linux 侧依赖 `libayatana-appindicator3`，在下面的 apt 依赖里已列。
+
 ## 构建
 
 `src-tauri/tauri.conf.json` 里 `bundle.targets` 是 `all`，本地直接 `pnpm tauri build` 会按当前

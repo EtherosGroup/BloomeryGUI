@@ -251,6 +251,8 @@ export const useVersionService = defineStore('VersionService', () => {
                 args.push('--folder', scope)
             }
             await client.run(args, { progress: false })
+            // CLI 会把 selectedFolder 切到实例所属文件夹，重列才能更新 selected 标记
+            await loadFolders()
             await loadList(scope)
         } catch (error) {
             failures.value = { ...failures.value, [scope]: toFailure(error) }

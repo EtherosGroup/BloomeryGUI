@@ -520,3 +520,46 @@ export interface CliModAsyncResult {
     tasks: CliDownloadTask[]
     spawn: { outcome: string; pid: number | null; log: string | null }
 }
+
+/** import 跳过项 */
+export interface CliImportSkipped {
+    /** 文件夹与 Java 用 path */
+    path?: string
+    /** 账号用 name / type */
+    name?: string
+    type?: string
+    /** exists | not-found | broken | duplicate | credential */
+    reason: string
+}
+
+/** import 带进来的文件夹 */
+export interface CliImportFolder {
+    id: string
+    path: string
+    versionCount: number
+}
+
+/** import 带进来的离线账号 */
+export interface CliImportAccount {
+    id: string
+    type: string
+    name: string
+    uuid: string | null
+}
+
+/** import <HMCL 目录> --json 结果 */
+export interface CliImportReport {
+    v: number
+    source: {
+        kind: string
+        path: string
+        localHome: string | null
+        userHome: string | null
+    }
+    dryRun: boolean
+    folders: { added: CliImportFolder[]; skipped: CliImportSkipped[] }
+    java: { added: CliJava[]; skipped: CliImportSkipped[] }
+    accounts: { added: CliImportAccount[]; skipped: CliImportSkipped[] }
+    selected: { folder: string | null; instance: string | null; account: string | null }
+    warnings: string[]
+}
