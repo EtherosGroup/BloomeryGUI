@@ -42,9 +42,10 @@ jobs:
                     # 通用二进制：Intel 与 Apple Silicon 同一份产物，一台运行器编两个切片
                     # macos-14 在公共仓库是 Apple Silicon 运行器；私有仓库若无 arm64 运行器，
                     # 换任意可用的 macOS 运行器即可（通用目标支持在 Intel 运行器上交叉编译）
+                    # bundles 必须带 app：Tauri 只打 dmg 时会把 .app 清理掉，zip 就没有内容可压
                     - os: macos-14
                       platform: macos-universal
-                      bundles: 'dmg'
+                      bundles: 'app,dmg'
                       build_args: '--target universal-apple-darwin'
         runs-on: ${{ matrix.os }}
         timeout-minutes: 90
@@ -161,15 +162,30 @@ jobs:
                       cp "src-tauri/target/release/bundle/deb/bloomery-gui_${version}_amd64.deb" "release/bloomery-gui-${version}-linux-x64.deb"
                       ;;
                     macos-universal)
-                      # 通用目标的 bundle 放在 target/universal-apple-darwin 下；不写死路径，两种布局都认
-                      shopt -s nullglob
-                      apps=(src-tauri/target/*/release/bundle/macos/*.app src-tauri/target/release/bundle/macos/*.app)
-                      dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg src-tauri/target/release/bundle/dmg/*.dmg)
-                      test "${#apps[@]}" -eq 1 || { echo "错误：期望 1 个 app，实际 ${#apps[@]}"; exit 1; }
-                      test "${#dmgs[@]}" -eq 1 || { echo "错误：期望 1 个 dmg，实际 ${#dmgs[@]}"; exit 1; }
-                      cp "${dmgs[0]}" "release/bloomery-gui-${version}-macos-universal.dmg"
+                      # 通用目标的 bundle 布局随 Tauri 版本与目标目录变化：按内容找、优先 universal 目录，
+                      # 并把候选路径打进日志，下次布局再变也能从日志定位
+                      app_list="$(find src-tauri/target -type d -name '*.app' 2>/dev/null || true)"
+                      dmg_list="$(find src-tauri/target -type f -name '*.dmg' 2>/dev/null || true)"
+                      echo "候选 app："
+                      printf '%s\n' "$app_list"
+                      echo "候选 dmg："
+                      printf '%s\n' "$dmg_list"
+                      app="$(printf '%s\n' "$app_list" | grep 'universal-apple-darwin' | sed -n '1p' || true)"
+                      if [ -z "$app" ]; then
+                        app="$(printf '%s\n' "$app_list" | sed -n '1p')"
+                      fi
+                      dmg="$(printf '%s\n' "$dmg_list" | grep 'universal-apple-darwin' | sed -n '1p' || true)"
+                      if [ -z "$dmg" ]; then
+                        dmg="$(printf '%s\n' "$dmg_list" | sed -n '1p')"
+                      fi
+                      test -n "$app" || { echo "错误：target 下没有 .app 产物（--bundles 只写 dmg 时 Tauri 会清掉 .app，需要 app,dmg）"; exit 1; }
+                      test -n "$dmg" || { echo "错误：target 下没有 .dmg 产物"; exit 1; }
+                      # 打包配置里 signingIdentity 为 "-"（ad-hoc），没有证书时也保证 app 有完整签名
+                      test -f "$app/Contents/MacOS/bloomery-gui" || { echo "错误：$app 内没有主可执行文件"; exit 1; }
+                      codesign --verify --deep --strict "$app" || { echo "错误：$app 签名校验失败（应为 ad-hoc 签名）"; exit 1; }
+                      cp "$dmg" "release/bloomery-gui-${version}-macos-universal.dmg"
                       # ditto 保留符号链接与资源分叉，解开即是一个可直接拖进 /Applications 的 app
-                      ditto -c -k --keepParent "${apps[0]}" "release/bloomery-gui-${version}-macos-universal.zip"
+                      ditto -c -k --keepParent "$app" "release/bloomery-gui-${version}-macos-universal.zip"
                       ;;
                   esac
                   ls -l release/

@@ -60,18 +60,20 @@ pnpm tauri build --bundles deb
 
 ```bash
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
-pnpm tauri build --target universal-apple-darwin --bundles dmg
+pnpm tauri build --target universal-apple-darwin --bundles app,dmg
 ```
 
-产物是同时含 `x86_64` 与 `arm64` 切片的通用二进制，`.app` 与 dmg 落在
+`--bundles` 必须同时带 `app`：Tauri 只打 `dmg` 时会把生成好的 `.app` 清理掉，`.app`
+就没有东西可压 zip。产物是同时含 `x86_64` 与 `arm64` 切片的通用二进制，`.app` 与 dmg 落在
 `src-tauri/target/universal-apple-darwin/release/bundle/` 下（注意带 target 名，与单架构的
-`target/release/bundle/` 不同）。`--bundles dmg` 只产出 dmg，需要 zip 时自行用
-`ditto -c -k --keepParent` 打包 `.app`。
+`target/release/bundle/` 不同）。zip 由 CI 或本地 `ditto -c -k --keepParent` 打包 `.app` 得到。
 
 macOS 图标是 `src-tauri/icons/icon.icns`，由仓库里的几档 PNG 拼出；换图标后重跑
-`pnpm run icons:icns` 再打包（`.icns` 不会自动跟着 PNG 更新）。工作流没有配置 Apple 签名证书，
-产物是 ad-hoc 签名、未公证包，首次打开需右键「打开」；要正式分发需自行配置开发者证书与公证。
-最低支持 macOS 10.15（`bundle.macOS.minimumSystemVersion`），Apple Silicon 需 11+。
+`pnpm run icons:icns` 再打包（`.icns` 不会自动跟着 PNG 更新）。`tauri.conf.json` 里
+`bundle.macOS.signingIdentity` 为 `"-"`，即 ad-hoc 签名：没有 Apple 证书也能产出带完整签名的
+`.app`/dmg，首次打开仍需右键「打开」；要正式分发（公证）时用 `APPLE_CERTIFICATE` +
+`APPLE_SIGNING_IDENTITY` 等环境变量覆盖即可。最低支持 macOS 10.15
+（`bundle.macOS.minimumSystemVersion`），Apple Silicon 需 11+。
 
 运行前提：GUI 首次启动会探测 Node.js（>= 22）与 `bloomery` CLI（`npm install -g bloomery`）。
 macOS 上装了 Homebrew 时可在配置页直接用它装 Node.js；没有 Homebrew 时配置页给出可复制的终端命令。
