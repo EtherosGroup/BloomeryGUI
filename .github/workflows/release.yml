@@ -1,10 +1,11 @@
-# 推 v* 标签发版，附带 Windows 与 Linux 的安装包
+# 推 v* 标签发版，附带 Windows、Linux 与 macOS 的安装包
 #
 # job 分层：package -> smoke -> release
-# 版本号两份：package.json、src-tauri/tauri.conf.json
-# 附件四个：msi、nsis setup、便携 zip、deb
-# 密钥：仅仓库自带 GITHUB_TOKEN
+# 版本号三处：package.json、src-tauri/tauri.conf.json、Cargo.toml
+# 附件七个：两种语言的 msi、nsis setup、便携 zip、deb、macOS 通用 dmg、macOS 通用 app zip
+# 密钥：仅仓库自带 GITHUB_TOKEN；macOS 未配置签名证书时产出 ad-hoc 签名的未公证包
 # 打包目标由命令行 --bundles 指定，tauri.conf.json 的 targets 不动
+# macOS 用 universal-apple-darwin 一次编译出 x86_64 + arm64 通用包，只需一台 macOS 运行器
 # workflow_dispatch 走演练路径：同样打包冒烟，只上传 workflow artifact
 
 name: release
@@ -33,11 +34,20 @@ jobs:
                     - os: windows-2022
                       platform: windows-x64
                       bundles: 'msi,nsis'
+                      build_args: ''
                     - os: ubuntu-22.04
                       platform: linux-x64
                       bundles: 'deb'
+                      build_args: ''
+                    # 通用二进制：Intel 与 Apple Silicon 同一份产物，一台运行器编两个切片
+                    # macos-14 在公共仓库是 Apple Silicon 运行器；私有仓库若无 arm64 运行器，
+                    # 换任意可用的 macOS 运行器即可（通用目标支持在 Intel 运行器上交叉编译）
+                    - os: macos-14
+                      platform: macos-universal
+                      bundles: 'dmg'
+                      build_args: '--target universal-apple-darwin'
         runs-on: ${{ matrix.os }}
-        timeout-minutes: 60
+        timeout-minutes: 90
         steps:
             - uses: actions/checkout@v4
 
@@ -52,9 +62,9 @@ jobs:
                   cache: pnpm
 
             # 版本一致性门禁：两份版本号互等，推标签时还等于标签
-            # 回归自检：错误信封真字节 + bundle.icon 与磁盘一致性 + 起进程入口
+            # 回归自检：错误信封真字节 + bundle.icon 与磁盘一致性 + icns 与 PNG 同步 + 起进程入口
             - name: 错误信封自检
-              run: pnpm run check:errors && pnpm run check:icons && pnpm run check:launch && pnpm run check:spawns
+              run: pnpm run check:errors && pnpm run check:icons && pnpm run check:icns && pnpm run check:launch && pnpm run check:spawns
 
             - name: 版本一致性门禁
               shell: bash
@@ -96,6 +106,11 @@ jobs:
             # Rust 工具链
             - uses: dtolnay/rust-toolchain@stable
 
+            # 通用二进制需要两个 Apple 目标；macOS 运行器自带 Xcode 命令行工具，不额外装 SDK
+            - name: 装 macOS 编译目标
+              if: matrix.platform == 'macos-universal'
+              run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
             # Rust 构建缓存
             - uses: Swatinem/rust-cache@v2
               with:
@@ -105,9 +120,9 @@ jobs:
             - name: 装前端依赖
               run: pnpm install --frozen-lockfile
 
-            # 打包，beforeBuildCommand 里跑 pnpm build
+            # 打包，beforeBuildCommand 里跑 pnpm build；macOS 靠 build_args 指定通用目标
             - name: 打包
-              run: pnpm tauri build --bundles ${{ matrix.bundles }}
+              run: pnpm tauri build --bundles ${{ matrix.bundles }} ${{ matrix.build_args }}
 
             # 便携包：Tauri 无 portable target，直接压 release 目录里的可执行文件
             - name: 打包便携版
@@ -124,8 +139,9 @@ jobs:
               run: |
                   set -euo pipefail
                   version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-                  # 首次跑若实际文件名与预期不同，看这段输出
-                  ls -R src-tauri/target/release/bundle || true
+                  # 首次跑若实际文件名与预期不同，看这段输出（universal 目标在 target/universal-apple-darwin 下）
+                  # 不用 -maxdepth：macOS 自带的 BSD find 不认这个参数
+                  find src-tauri/target -path '*bundle*' | sort | head -80 || true
                   mkdir -p release
                   case "${{ matrix.platform }}" in
                     windows-x64)
@@ -143,6 +159,17 @@ jobs:
                       ;;
                     linux-x64)
                       cp "src-tauri/target/release/bundle/deb/bloomery-gui_${version}_amd64.deb" "release/bloomery-gui-${version}-linux-x64.deb"
+                      ;;
+                    macos-universal)
+                      # 通用目标的 bundle 放在 target/universal-apple-darwin 下；不写死路径，两种布局都认
+                      shopt -s nullglob
+                      apps=(src-tauri/target/*/release/bundle/macos/*.app src-tauri/target/release/bundle/macos/*.app)
+                      dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg src-tauri/target/release/bundle/dmg/*.dmg)
+                      test "${#apps[@]}" -eq 1 || { echo "错误：期望 1 个 app，实际 ${#apps[@]}"; exit 1; }
+                      test "${#dmgs[@]}" -eq 1 || { echo "错误：期望 1 个 dmg，实际 ${#dmgs[@]}"; exit 1; }
+                      cp "${dmgs[0]}" "release/bloomery-gui-${version}-macos-universal.dmg"
+                      # ditto 保留符号链接与资源分叉，解开即是一个可直接拖进 /Applications 的 app
+                      ditto -c -k --keepParent "${apps[0]}" "release/bloomery-gui-${version}-macos-universal.zip"
                       ;;
                   esac
                   ls -l release/
@@ -166,6 +193,59 @@ jobs:
                   grep -qx "Name=Bloomery" "$entry" || { echo "错误：Name 不符"; exit 1; }
                   echo "桌面入口校验通过"
 
+            # macOS 产物：dmg 能挂载、app 是通用二进制、Info.plist 与版本号一致、签名结构完整
+            - name: 校验 macOS 产物
+              if: matrix.platform == 'macos-universal'
+              run: |
+                  set -euo pipefail
+                  version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+                  dmg="release/bloomery-gui-${version}-macos-universal.dmg"
+                  zip="release/bloomery-gui-${version}-macos-universal.zip"
+                  test -s "$dmg" || { echo "错误：产物缺失：$dmg"; exit 1; }
+                  test -s "$zip" || { echo "错误：产物缺失：$zip"; exit 1; }
+
+                  # zip 先验：ditto 解包后应得到一个完整 app
+                  rm -rf /tmp/appcheck && mkdir -p /tmp/appcheck
+                  ditto -x -k "$zip" /tmp/appcheck
+                  app="/tmp/appcheck/bloomery-gui.app"
+                  test -d "$app" || { echo "错误：zip 内没有 bloomery-gui.app"; exit 1; }
+                  binary="$app/Contents/MacOS/bloomery-gui"
+                  test -f "$binary" || { echo "错误：app 内没有可执行文件"; exit 1; }
+
+                  # Info.plist：标识符、版本号、最低系统版本
+                  plist="$app/Contents/Info.plist"
+                  test -f "$plist" || { echo "错误：app 内没有 Info.plist"; exit 1; }
+                  bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"
+                  test "$bundle_id" = "cn.skilfully.etheros.bloomery.gui" || { echo "错误：CFBundleIdentifier 不符：$bundle_id"; exit 1; }
+                  short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+                  test "$short_version" = "$version" || { echo "错误：CFBundleShortVersionString $short_version，附件版本 $version"; exit 1; }
+                  minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist")"
+                  test "$minimum" = "10.15" || { echo "错误：LSMinimumSystemVersion 不符：$minimum"; exit 1; }
+
+                  # 通用二进制：两个切片都要在
+                  archs="$(lipo -archs "$binary")"
+                  case "$archs" in
+                    *x86_64*) ;;
+                    *) echo "错误：缺少 x86_64 切片：$archs"; exit 1 ;;
+                  esac
+                  case "$archs" in
+                    *arm64*) ;;
+                    *) echo "错误：缺少 arm64 切片：$archs"; exit 1 ;;
+                  esac
+
+                  # 未配置证书时 Tauri 走 ad-hoc 签名；签名结构必须完整，否则用户右键打开也会被拦
+                  codesign --verify --deep --strict "$app" || { echo "错误：app 签名校验失败"; exit 1; }
+
+                  # dmg 校验：校验和正确、能挂载、挂载后是同一个 app
+                  hdiutil verify "$dmg" >/dev/null
+                  mountpoint="/tmp/bloomery-dmg"
+                  rm -rf "$mountpoint" && mkdir -p "$mountpoint"
+                  hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" "$dmg" >/dev/null
+                  trap 'hdiutil detach "$mountpoint" >/dev/null 2>&1 || true' EXIT
+                  test -d "$mountpoint/bloomery-gui.app" || { echo "错误：dmg 内没有 bloomery-gui.app"; exit 1; }
+                  hdiutil detach "$mountpoint" >/dev/null
+                  echo "macOS 产物校验通过：$bundle_id $short_version $archs"
+
             - name: 核对产物清单
               shell: bash
               run: |
@@ -183,6 +263,12 @@ jobs:
                     linux-x64)
                       expected=(
                         "release/bloomery-gui-${version}-linux-x64.deb"
+                      )
+                      ;;
+                    macos-universal)
+                      expected=(
+                        "release/bloomery-gui-${version}-macos-universal.dmg"
+                        "release/bloomery-gui-${version}-macos-universal.zip"
                       )
                       ;;
                   esac
@@ -212,8 +298,10 @@ jobs:
                       platform: linux-x64
                     - os: windows-2022
                       platform: windows-x64
+                    - os: macos-14
+                      platform: macos-universal
         runs-on: ${{ matrix.os }}
-        timeout-minutes: 20
+        timeout-minutes: 25
         steps:
             - uses: actions/download-artifact@v4
               with:
@@ -303,6 +391,91 @@ jobs:
                     Write-Host "启动存活：便携版可运行"
                   }
 
+            # macOS：dmg 校验和、挂载后的 app 结构、通用二进制切片、Info.plist、签名
+            - name: 核对 dmg 与 app
+              if: runner.os == 'macOS'
+              run: |
+                  set -euo pipefail
+                  dmg="$(ls assets/*-macos-universal.dmg)"
+                  name="$(basename "$dmg")"
+                  version="${name#bloomery-gui-}"
+                  version="${version%-macos-universal.dmg}"
+                  echo "附件：$name 版本 $version"
+
+                  # dmg 末尾 512 字节是 koly 尾块，尾块异常说明下载或打包被截断
+                  tail -c 512 "$dmg" | grep -q 'koly' || { echo "错误：dmg 尾块异常"; exit 1; }
+                  hdiutil verify "$dmg" >/dev/null
+
+                  mountpoint="/tmp/bloomery-smoke-dmg"
+                  rm -rf "$mountpoint" && mkdir -p "$mountpoint"
+                  hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" "$dmg" >/dev/null
+                  trap 'hdiutil detach "$mountpoint" >/dev/null 2>&1 || true' EXIT
+                  app="$mountpoint/bloomery-gui.app"
+                  test -d "$app" || { echo "错误：dmg 内没有 app"; exit 1; }
+                  plist="$app/Contents/Info.plist"
+                  bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"
+                  test "$bundle_id" = "cn.skilfully.etheros.bloomery.gui" || { echo "错误：bundle id 不符：$bundle_id"; exit 1; }
+                  short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+                  test "$short_version" = "$version" || { echo "错误：版本不符：$short_version ≠ $version"; exit 1; }
+                  binary="$app/Contents/MacOS/bloomery-gui"
+                  test -f "$binary" || { echo "错误：app 内没有可执行文件"; exit 1; }
+                  archs="$(lipo -archs "$binary")"
+                  case "$archs" in
+                    *x86_64*) ;;
+                    *) echo "错误：缺少 x86_64 切片：$archs"; exit 1 ;;
+                  esac
+                  case "$archs" in
+                    *arm64*) ;;
+                    *) echo "错误：缺少 arm64 切片：$archs"; exit 1 ;;
+                  esac
+                  codesign --verify --deep --strict "$app" || { echo "错误：签名校验失败"; exit 1; }
+                  hdiutil detach "$mountpoint" >/dev/null
+                  echo "dmg 核对通过：$bundle_id $version $archs"
+
+                  # zip 内应与 dmg 一致
+                  zip="$(ls assets/*-macos-universal.zip)"
+                  rm -rf /tmp/bloomery-smoke-zip && mkdir -p /tmp/bloomery-smoke-zip
+                  ditto -x -k "$zip" /tmp/bloomery-smoke-zip
+                  test -f /tmp/bloomery-smoke-zip/bloomery-gui.app/Contents/MacOS/bloomery-gui || { echo "错误：zip 内没有可执行文件"; exit 1; }
+
+            # 启动存活检查：20 秒内未退出即窗口起来了
+            # 无头 runner 可能没有桌面会话，偶发失败不阻塞发布
+            - name: 跑一遍 app（不阻塞）
+              continue-on-error: true
+              if: runner.os == 'macOS'
+              run: |
+                  set -euo pipefail
+                  dmg="$(ls assets/*-macos-universal.dmg)"
+                  mountpoint="/tmp/bloomery-run-dmg"
+                  rm -rf "$mountpoint" && mkdir -p "$mountpoint"
+                  hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" "$dmg" >/dev/null
+                  trap 'hdiutil detach "$mountpoint" >/dev/null 2>&1 || true' EXIT
+                  binary="$mountpoint/bloomery-gui.app/Contents/MacOS/bloomery-gui"
+                  set +e
+                  "$binary" > /tmp/app.log 2>&1 &
+                  pid=$!
+                  alive=1
+                  for _ in $(seq 1 20); do
+                    sleep 1
+                    if ! kill -0 "$pid" 2>/dev/null; then
+                      alive=0
+                      break
+                    fi
+                  done
+                  if [ "$alive" = "1" ]; then
+                    kill -9 "$pid" 2>/dev/null
+                    wait "$pid" 2>/dev/null
+                    hdiutil detach "$mountpoint" >/dev/null 2>&1 || true
+                    echo "启动存活：app 可运行"
+                  else
+                    wait "$pid"
+                    code=$?
+                    echo "错误：启动即退出，退出码 $code"
+                    cat /tmp/app.log
+                    hdiutil detach "$mountpoint" >/dev/null 2>&1 || true
+                    exit 1
+                  fi
+
     # 建 Release
     release:
         needs: [package, smoke]
@@ -335,6 +508,8 @@ jobs:
                     "bloomery-gui-${version}-windows-x64-setup.exe"
                     "bloomery-gui-${version}-windows-x64-portable.zip"
                     "bloomery-gui-${version}-linux-x64.deb"
+                    "bloomery-gui-${version}-macos-universal.dmg"
+                    "bloomery-gui-${version}-macos-universal.zip"
                   )
                   files=()
                   # 附件逐个核对：缺一个即不发版

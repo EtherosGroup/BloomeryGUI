@@ -68,7 +68,7 @@ function compare(left: string, right: string): number {
     return 0
 }
 
-/** 环境探测：Node / Bloomery / nvm / pnpm 与可更新的最新版本 */
+/** 环境探测：Node / Bloomery / nvm / pnpm / Homebrew 与可更新的最新版本 */
 export const useEnvironmentCheckService = defineStore('EnvironmentCheckService', () => {
     const checked = ref(false)
     const checking = ref(false)
@@ -79,6 +79,8 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
     const bloomery = ref<ToolFact>({ found: false, version: '', major: null })
     const nvm = ref<ToolFact>({ found: false, version: '', major: null })
     const pnpm = ref<ToolFact>({ found: false, version: '', major: null })
+    /** macOS 上的 Homebrew，非 macOS 恒为未找到 */
+    const brew = ref<ToolFact>({ found: false, version: '', major: null })
     /** 官方最新 LTS，取不到为空串 */
     const latestNode = ref('')
     /** npm 上的最新版，取不到为空串 */
@@ -127,6 +129,9 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
             bloomery.value = await probe('bloomery', ['--version'])
             nvm.value = await probe('nvm', ['version'])
             pnpm.value = await probe('pnpm', ['--version'])
+            if (facts.value.platform === 'macos') {
+                brew.value = await probe('brew', ['--version'])
+            }
             await fetchLatest()
         } finally {
             checking.value = false
@@ -167,6 +172,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
 
     const isWindows = computed(() => facts.value.platform === 'windows')
     const isLinux = computed(() => facts.value.platform === 'linux')
+    const isMacos = computed(() => facts.value.platform === 'macos')
 
     /** 依次探测常见包管理器，取第一个可用的 */
     async function detectPackageManager(): Promise<string> {
@@ -179,9 +185,24 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         return ''
     }
 
-    /** Linux 上给用户自己执行的命令 */
-    const linuxCommands = computed<string[]>(() => {
+    /** 给用户自己执行的安装命令：Linux 按包管理器，macOS 按 Homebrew 情况 */
+    const installCommands = computed<string[]>(() => {
         const rows: string[] = []
+        if (isMacos.value) {
+            // brew install 对已安装但过期的 formula 会自动升级，统一用它
+            if (!brew.value.found) {
+                rows.push(
+                    '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+                )
+            }
+            rows.push('brew install node')
+            rows.push(bloomery.value.found ? 'npm update -g bloomery' : 'npm install -g bloomery')
+            rows.push('# 或者用 nvm 安装 Node.js：https://github.com/nvm-sh/nvm')
+            return rows
+        }
+        if (!isLinux.value) {
+            return rows
+        }
         const pkg = packageManager.value
         if (pkg === 'apt') {
             rows.push('sudo apt update && sudo apt install -y nodejs npm')
@@ -242,21 +263,18 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
     let updateId = ''
     let updateCancelled = false
 
-    /** 更新 Bloomery：输出逐行回传，版本前后对比在结果里 */
-    async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<UpdateOutcome> {
-        // npm 的 update 对没装过的全局包会报错，未安装时改用 install
-        const verb = bloomery.value.found ? 'update' : 'install'
-        const args = manager === 'pnpm' ? ['add', '-g', 'bloomery'] : [verb, '-g', 'bloomery']
-        const command = `${manager} ${args.join(' ')}`
-        const before = bloomery.value.version
-
+    /** 跑一条流式命令：逐行回传输出，结束后复位更新状态 */
+    async function streamCommand(
+        program: string,
+        args: string[],
+    ): Promise<{ code: number | null; spawned: boolean; cancelled: boolean }> {
         updating.value = true
         updateCancelled = false
         updateLines.value = []
-        updateId = `update-bloomery-${Date.now()}`
+        updateId = `update-${program}-${Date.now()}`
 
         try {
-            const outcome = await runProgramStream(manager, args, {
+            const outcome = await runProgramStream(program, args, {
                 id: updateId,
                 onLine: (line) => {
                     const text = line.trim()
@@ -266,42 +284,98 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
                     updateLines.value = [...updateLines.value, text].slice(-UPDATE_LINE_LIMIT)
                 },
             })
-            await check()
-            const tail = updateLines.value.slice(-12)
-            if (!outcome.spawned) {
-                return {
-                    ok: false,
-                    cancelled: false,
-                    before,
-                    after: bloomery.value.version,
-                    command,
-                    tail,
-                    error: `${manager} 调用失败，可能未安装`,
-                }
-            }
-            if (updateCancelled) {
-                return {
-                    ok: false,
-                    cancelled: true,
-                    before,
-                    after: bloomery.value.version,
-                    command,
-                    tail,
-                    error: '已取消',
-                }
-            }
+            return { code: outcome.code, spawned: outcome.spawned, cancelled: updateCancelled }
+        } finally {
+            updating.value = false
+            updateId = ''
+        }
+    }
+
+    /** 更新 Bloomery：输出逐行回传，版本前后对比在结果里 */
+    async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<UpdateOutcome> {
+        // npm 的 update 对没装过的全局包会报错，未安装时改用 install
+        const verb = bloomery.value.found ? 'update' : 'install'
+        const args = manager === 'pnpm' ? ['add', '-g', 'bloomery'] : [verb, '-g', 'bloomery']
+        const command = `${manager} ${args.join(' ')}`
+        const before = bloomery.value.version
+
+        const result = await streamCommand(manager, args)
+        await check()
+        const tail = updateLines.value.slice(-12)
+        if (!result.spawned) {
             return {
-                ok: outcome.code === 0,
+                ok: false,
                 cancelled: false,
                 before,
                 after: bloomery.value.version,
                 command,
                 tail,
-                error: outcome.code === 0 ? '' : `${command} 退出码 ${outcome.code ?? '未知'}`,
+                error: `${manager} 调用失败，可能未安装`,
             }
-        } finally {
-            updating.value = false
-            updateId = ''
+        }
+        if (result.cancelled) {
+            return {
+                ok: false,
+                cancelled: true,
+                before,
+                after: bloomery.value.version,
+                command,
+                tail,
+                error: '已取消',
+            }
+        }
+        return {
+            ok: result.code === 0,
+            cancelled: false,
+            before,
+            after: bloomery.value.version,
+            command,
+            tail,
+            error: result.code === 0 ? '' : `${command} 退出码 ${result.code ?? '未知'}`,
+        }
+    }
+
+    /** macOS：用 Homebrew 安装 Node.js（已装过期的 formula 会自动升级），输出逐行回传 */
+    async function updateNodeWithBrew(): Promise<UpdateOutcome> {
+        // brew install 对已安装但过期的 formula 会自动升级，也兼容 nvm 装的 Node
+        const args = ['install', 'node']
+        const command = 'brew install node'
+        const before = node.value.version
+
+        const result = await streamCommand('brew', args)
+        await check()
+        const tail = updateLines.value.slice(-12)
+        const after = node.value.version
+        if (!result.spawned) {
+            return {
+                ok: false,
+                cancelled: false,
+                before,
+                after,
+                command,
+                tail,
+                error: 'brew 调用失败，可能未安装',
+            }
+        }
+        if (result.cancelled) {
+            return {
+                ok: false,
+                cancelled: true,
+                before,
+                after,
+                command,
+                tail,
+                error: '已取消',
+            }
+        }
+        return {
+            ok: result.code === 0,
+            cancelled: false,
+            before,
+            after,
+            command,
+            tail,
+            error: result.code === 0 ? '' : `${command} 退出码 ${result.code ?? '未知'}`,
         }
     }
 
@@ -321,10 +395,13 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         packageManager,
         isWindows,
         isLinux,
-        linuxCommands,
+        isMacos,
+        brew,
+        installCommands,
         nodeInstaller,
         installNode,
         updateNode,
+        updateNodeWithBrew,
         node,
         bloomery,
         nvm,

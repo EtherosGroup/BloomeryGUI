@@ -43,7 +43,19 @@ if (await busy()) {
         }
     } else {
         run(`fuser -k ${port}/tcp`)
-        run(`lsof -ti tcp:${port} | xargs -r kill`)
+        // macOS 的 xargs 没有 -r（GNU 专有），这里在 Node 里接管 lsof 的 pid 列表
+        try {
+            const rows = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf8' })
+            const pids = rows
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((pid) => pid.length > 0 && /^\d+$/.test(pid))
+            for (const pid of pids) {
+                run(`kill -9 ${pid}`)
+            }
+        } catch {
+            // 没有输出表示端口已释放
+        }
     }
     await new Promise((resolve) => setTimeout(resolve, 300))
     process.exit(0)

@@ -76,6 +76,13 @@ fn extra_directories(
         fixed.push(home.join(".volta").join("bin"));
     }
 
+    // macOS 上 pnpm 默认的 PNPM_HOME 是 ~/Library/pnpm，从 Finder 启动的 GUI 的 PATH 里没有它；
+    // 目录不存在时不入列，对其它平台没有实际影响
+    if let Some(home) = home {
+        fixed.push(home.join("Library").join("pnpm"));
+        fixed.push(home.join("Library").join("pnpm").join("bin"));
+    }
+
     #[cfg(windows)]
     {
         if let Some(appdata) = std::env::var_os("APPDATA") {
@@ -93,6 +100,23 @@ fn extra_directories(
             "/bin",
             "/snap/bin",
             "/opt/homebrew/bin",
+        ]
+        .into_iter()
+        .map(PathBuf::from),
+    );
+
+    // macOS：GUI 从 Finder 启动时继承的 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，
+    // Homebrew 与 MacPorts 的目录、sbin 都在 PATH 之外；/opt/homebrew/bin 已在上面通用列表里，
+    // 这里补其余固定目录，is_dir 筛过后再按去重规则入列
+    #[cfg(target_os = "macos")]
+    fixed.extend(
+        [
+            "/opt/homebrew/sbin",
+            "/opt/local/bin",
+            "/opt/local/sbin",
+            "/usr/local/sbin",
+            "/usr/sbin",
+            "/sbin",
         ]
         .into_iter()
         .map(PathBuf::from),
@@ -462,6 +486,26 @@ mod tests {
 
         assert_eq!(dirs.first(), Some(&pnpm.join("bin")));
         let _ = fs::remove_dir_all(home);
+    }
+
+    /// macOS 上 pnpm 默认把全局目录放在 ~/Library/pnpm，Finder 启动的 GUI 的 PATH 里没有它
+    #[test]
+    fn extra_directories_includes_macos_pnpm_home() {
+        let home = temp_dir("extra-macos-pnpm");
+        let pnpm = home.join("Library").join("pnpm");
+        write_program(&pnpm.join("bin"), "bloomery");
+
+        let dirs = extra_directories(Some(&home), None, None);
+        assert!(dirs.contains(&pnpm));
+        assert!(dirs.contains(&pnpm.join("bin")));
+
+        // 目录不存在时不入列
+        let empty = temp_dir("extra-macos-pnpm-empty");
+        let absent = empty.join("Library").join("pnpm");
+        assert!(!extra_directories(Some(&empty), None, None).contains(&absent));
+
+        let _ = fs::remove_dir_all(home);
+        let _ = fs::remove_dir_all(empty);
     }
 
     /// 桌面会话的 PATH 里没有 nvm 的 bin，靠 home 推出来

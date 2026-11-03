@@ -22,7 +22,13 @@ const environment = useEnvironmentService()
 /** 手动设置弹窗：node 给指引，bloomery 写路径 */
 /** 动作弹窗：确认、二选一、终端命令、结果 */
 const flow = ref<
-    '' | 'node-confirm' | 'bloomery-choose' | 'linux-commands' | 'updating' | 'result'
+    | ''
+    | 'node-confirm'
+    | 'node-brew-confirm'
+    | 'bloomery-choose'
+    | 'commands'
+    | 'updating'
+    | 'result'
 >('')
 const flowTitle = ref('')
 const flowText = ref('')
@@ -43,8 +49,16 @@ const MESSAGES: Record<EnvSituation, string> = {
     ready: '环境就绪',
 }
 
-/** Linux 引导用户在终端执行，按包管理器给命令 */
-const linuxHint = computed(() => {
+/** 手动设置 Node.js 的引导：Linux 按包管理器给命令，macOS 给安装途径 */
+const nodeHint = computed(() => {
+    if (env.isMacos) {
+        const ways = [
+            'Homebrew：brew install node',
+            '官方安装包：https://nodejs.org/',
+            'nvm：https://github.com/nvm-sh/nvm',
+        ]
+        return ways.join('\n')
+    }
     const commands = [
         'Debian / Ubuntu：sudo apt install nodejs npm',
         'Fedora / RHEL：sudo dnf install nodejs npm',
@@ -96,8 +110,20 @@ function confirm(): void {
 function actNode(): void {
     if (env.isLinux) {
         flowTitle.value = '在终端执行'
-        flowText.value = env.linuxCommands.join('\n')
-        flow.value = 'linux-commands'
+        flowText.value = env.installCommands.join('\n')
+        flow.value = 'commands'
+        return
+    }
+    if (env.isMacos) {
+        if (!env.brew.found) {
+            flowTitle.value = '在终端执行'
+            flowText.value = env.installCommands.join('\n')
+            flow.value = 'commands'
+            return
+        }
+        flowTitle.value = '使用 Homebrew 安装 Node.js'
+        flowText.value = '用 Homebrew 安装 Node.js · 命令输出会实时显示 · 过程中可以取消'
+        flow.value = 'node-brew-confirm'
         return
     }
     if (env.node.found && env.nvm.found) {
@@ -158,6 +184,35 @@ async function runBloomery(manager: 'npm' | 'pnpm'): Promise<void> {
             cancelled: false,
             before: env.bloomery.version,
             after: env.bloomery.version,
+            command: '',
+            tail: [],
+            error: error instanceof Error ? error.message : String(error),
+        }
+    } finally {
+        busy.value = false
+        stopTicker()
+        flowTitle.value = '结果'
+        flow.value = 'result'
+    }
+}
+
+/** macOS：用 Homebrew 安装 Node.js（过期的 formula 会顺带升级），实时输出 */
+async function runBrewNode(): Promise<void> {
+    busy.value = true
+    outcome.value = null
+    flowText.value = 'brew install node'
+    flowTitle.value = '更新 Node.js'
+    flow.value = 'updating'
+    flowStartedAt.value = Date.now()
+    startTicker()
+    try {
+        outcome.value = await env.updateNodeWithBrew()
+    } catch (error) {
+        outcome.value = {
+            ok: false,
+            cancelled: false,
+            before: env.node.version,
+            after: env.node.version,
             command: '',
             tail: [],
             error: error instanceof Error ? error.message : String(error),
@@ -238,6 +293,11 @@ const flowButtons = computed<PopupWindowButton[]>(() => {
                 { label: '取消' },
                 { label: '继续', onClick: () => void runNode(), closeOnClick: false },
             ]
+        case 'node-brew-confirm':
+            return [
+                { label: '取消' },
+                { label: '继续', onClick: () => void runBrewNode(), closeOnClick: false },
+            ]
         case 'updating':
             return [{ label: '取消', onClick: abortUpdate, closeOnClick: false }]
         case 'result':
@@ -245,9 +305,9 @@ const flowButtons = computed<PopupWindowButton[]>(() => {
                 { label: '复制命令', onClick: copyResultCommand, closeOnClick: false },
                 { label: '知道了' },
             ]
-        case 'linux-commands':
+        case 'commands':
             return [
-                { label: '复制命令', onClick: copyLinuxCommands, closeOnClick: false },
+                { label: '复制命令', onClick: copyInstallCommands, closeOnClick: false },
                 { label: '知道了' },
             ]
         default:
@@ -264,8 +324,8 @@ async function copyTextAndToast(text: string): Promise<void> {
     notifyError('复制失败')
 }
 
-function copyLinuxCommands(): void {
-    void copyTextAndToast(env.linuxCommands.join('\n'))
+function copyInstallCommands(): void {
+    void copyTextAndToast(env.installCommands.join('\n'))
 }
 
 function copyResultCommand(): void {
@@ -363,7 +423,7 @@ onMounted(() => {
                 }}</pre>
             </template>
             <pre
-                v-else-if="flow === 'linux-commands' || flow === 'result'"
+                v-else-if="flow === 'commands' || flow === 'result'"
                 class="setup__commands"
                 >{{ flowText }}</pre>
             <template v-else>
@@ -396,7 +456,7 @@ onMounted(() => {
             </template>
             <template v-else>
                 <p class="setup__note">Node.js 安装后重新探测</p>
-                <pre class="setup__commands">{{ linuxHint }}</pre>
+                <pre class="setup__commands">{{ nodeHint }}</pre>
             </template>
         </PopupWindow>
     </main>

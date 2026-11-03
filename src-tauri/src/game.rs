@@ -65,8 +65,33 @@ fn process_alive(pid: u32) -> Option<bool> {
     }
 }
 
+/// macOS：直接调 kill(pid, 0) 问内核，省掉每次轮询都起一个 kill 进程
+#[cfg(target_os = "macos")]
+fn process_alive(pid: u32) -> Option<bool> {
+    extern "C" {
+        // 0 成功；失败时读 errno 区分“进程不存在”和“无权限”
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    /// ESRCH：进程不存在
+    const ESRCH: i32 = 3;
+    /// EPERM：进程存在但不归我们，发信号没权限
+    const EPERM: i32 = 1;
+
+    // pid 来自 u32，超出 i32 的按未知处理
+    let pid = i32::try_from(pid).ok()?;
+    if unsafe { kill(pid, 0) } == 0 {
+        return Some(true);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(ESRCH) => Some(false),
+        Some(EPERM) => Some(true),
+        _ => None,
+    }
+}
+
 /// 其它平台：问一下系统命令，取不到就当未知
-#[cfg(all(not(windows), not(target_os = "linux")))]
+#[cfg(all(not(windows), not(target_os = "linux"), not(target_os = "macos")))]
 fn process_alive(pid: u32) -> Option<bool> {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
