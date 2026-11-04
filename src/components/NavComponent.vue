@@ -372,8 +372,20 @@ function resolveTo(item: NavItem): RouteLocationRaw {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
-    // 滚动条槽位常驻
+}
+
+// 展开态内容多，滚动条槽位常驻，免得滚动条出现时条目横向跳动
+.nav:not(.nav--collapsed) .nav__menu {
     scrollbar-gutter: stable;
+}
+
+/*
+ * 收起态只有图标：槽位会把条目从 48px 挤到 32px，
+ * 选中/悬停高亮就比汉堡按钮窄一截、与图标中线错位；
+ * 这里不占槽位并隐藏滚动条（仍可用滚轮滚动），条目保持与按钮同宽
+ */
+.nav--collapsed .nav__menu {
+    scrollbar-width: none;
 }
 
 .nav__brand {
