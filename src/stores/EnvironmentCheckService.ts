@@ -99,6 +99,19 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         }
     }
 
+    /** 只刷新 npm 上的最新版；取不到就保留上一轮的版本号，不打断探测与更新 */
+    async function refreshLatestBloomery(): Promise<void> {
+        try {
+            const response = await fetch(BLOOMERY_LATEST)
+            const row = (await response.json()) as { version?: string }
+            if (typeof row.version === 'string' && row.version.length > 0) {
+                latestBloomery.value = row.version
+            }
+        } catch {
+            // 网络失败：调用方会退回 @latest 标签或已有版本号
+        }
+    }
+
     /** 官方版本信息，取不到就留空，不阻断探测 */
     async function fetchLatest(): Promise<void> {
         try {
@@ -109,13 +122,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         } catch {
             latestNode.value = ''
         }
-        try {
-            const response = await fetch(BLOOMERY_LATEST)
-            const row = (await response.json()) as { version?: string }
-            latestBloomery.value = row.version ?? ''
-        } catch {
-            latestBloomery.value = ''
-        }
+        await refreshLatestBloomery()
     }
 
     async function check(): Promise<void> {
@@ -185,6 +192,22 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         return ''
     }
 
+    /**
+     * 安装/更新 Bloomery 时钉住的版本
+     * 能拿到 npm 上的最新版就写死 @x.y.z：npm update 受已装版本的范围限制，
+     * 还可能沿用本地缓存里的旧版本信息，不一定装到最新
+     * 版本号还没取到时退到 @latest 标签，同样直接取最新版
+     */
+    const bloomeryVersionSuffix = computed(() =>
+        latestBloomery.value.length > 0 ? `@${latestBloomery.value}` : '@latest',
+    )
+
+    /** 安装或更新 Bloomery 的命令：实际执行与界面展示共用，避免两处写法漂移 */
+    function bloomeryInstallCommand(manager: 'npm' | 'pnpm'): string {
+        const spec = `bloomery${bloomeryVersionSuffix.value}`
+        return manager === 'pnpm' ? `pnpm add -g ${spec}` : `npm install -g ${spec}`
+    }
+
     /** 给用户自己执行的安装命令：Linux 按包管理器，macOS 按 Homebrew 情况 */
     const installCommands = computed<string[]>(() => {
         const rows: string[] = []
@@ -196,7 +219,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
                 )
             }
             rows.push('brew install node')
-            rows.push(bloomery.value.found ? 'npm update -g bloomery' : 'npm install -g bloomery')
+            rows.push(bloomeryInstallCommand('npm'))
             rows.push('# 或者用 nvm 安装 Node.js：https://github.com/nvm-sh/nvm')
             return rows
         }
@@ -216,7 +239,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
             rows.push('# 未识别包管理器，按发行版选择 apt / dnf / pacman / zypper')
         }
         rows.push('nvm install --lts && nvm alias default lts/*')
-        rows.push('npm update -g bloomery')
+        rows.push(bloomeryInstallCommand('npm'))
         return rows
     })
 
@@ -293,9 +316,11 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
 
     /** 更新 Bloomery：输出逐行回传，版本前后对比在结果里 */
     async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<UpdateOutcome> {
-        // npm 的 update 对没装过的全局包会报错，未安装时改用 install
-        const verb = bloomery.value.found ? 'update' : 'install'
-        const args = manager === 'pnpm' ? ['add', '-g', 'bloomery'] : [verb, '-g', 'bloomery']
+        // 探测是启动时做的，命令里钉的版本要按现在的最新版来
+        await refreshLatestBloomery()
+        const spec = `bloomery${bloomeryVersionSuffix.value}`
+        // 统一用 install 钉版本：npm update 只按已装时的范围升级，拿不到最新的情况很常见
+        const args = manager === 'pnpm' ? ['add', '-g', spec] : ['install', '-g', spec]
         const command = `${manager} ${args.join(' ')}`
         const before = bloomery.value.version
 
@@ -398,6 +423,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
         isMacos,
         brew,
         installCommands,
+        bloomeryInstallCommand,
         nodeInstaller,
         installNode,
         updateNode,

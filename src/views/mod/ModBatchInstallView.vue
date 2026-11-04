@@ -12,6 +12,7 @@ import { errorSummary } from '@/api/errorMessages'
 import { openPath } from '@/api/system'
 import { MOD_API_REQUIRED, type CliModFile } from '@/api/types'
 import type { ModAction } from '@/stores/ModService'
+import { useEnvironmentCheckService } from '@/stores/EnvironmentCheckService'
 import { useModDownloadService } from '@/stores/ModDownloadService'
 import { useModService } from '@/stores/ModService'
 import { useModTarget } from '@/composables/useModTarget'
@@ -21,6 +22,7 @@ import { downloadsText, gameText, loaderText, sizeText, skipLabel } from '@/util
 
 const mod = useModService()
 const queue = useModDownloadService()
+const envCheck = useEnvironmentCheckService()
 const router = useRouter()
 const {
     folderId,
@@ -345,8 +347,9 @@ onMounted(boot)
         <p v-if="engineTooOld" class="mod__failure">
             <span class="mod__failure-code">引擎版本过低</span>
             <span class="mod__failure-detail">
-                当前引擎 api {{ apiText }} · MOD 相关命令要 api {{ MOD_API_REQUIRED }} 起 ·
-                升级：npm update -g bloomery
+                当前引擎 api {{ apiText }} · MOD 相关命令要 api {{ MOD_API_REQUIRED }} 起 · 升级：{{
+                    envCheck.bloomeryInstallCommand('npm')
+                }}
             </span>
         </p>
 

@@ -170,8 +170,8 @@ async function runNode(): Promise<void> {
 async function runBloomery(manager: 'npm' | 'pnpm'): Promise<void> {
     busy.value = true
     outcome.value = null
-    const verb = env.bloomery.found ? 'update' : 'install'
-    flowText.value = manager === 'pnpm' ? 'pnpm add -g bloomery' : `npm ${verb} -g bloomery`
+    // 与 store 里实际执行的命令同一份写法：钉住最新版，不走 npm update
+    flowText.value = env.bloomeryInstallCommand(manager)
     flowTitle.value = '更新 Bloomery'
     flow.value = 'updating'
     flowStartedAt.value = Date.now()
