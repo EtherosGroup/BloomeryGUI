@@ -36,6 +36,10 @@ pnpm tauri dev    # 起完整桌面应用（devUrl 固定 http://localhost:1420�
 双击托盘图标回到主界面（Linux 上 appindicator 不派发点击事件，用菜单）。
 托盘图标沿用应用图标；Linux 侧依赖 `libayatana-appindicator3`，在下面的 apt 依赖里已列。
 
+只允许同时跑一个实例：再次启动可执行文件时，新进程把命令行交给已在运行的实例后立刻退出，
+已有主窗口若收在托盘或最小化会被叫回前台；实现用 `tauri-plugin-single-instance`，它注册在其它插件前面。
+`pnpm tauri dev` 同理，重复启动只会唤回已在跑的那个开发实例。
+
 ## 构建
 
 `src-tauri/tauri.conf.json` 里 `bundle.targets` 是 `all`，本地直接 `pnpm tauri build` 会按当前

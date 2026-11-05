@@ -24,9 +24,10 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-/// 显示并聚焦主窗口：隐藏到托盘后从菜单或双击图标唤回
+/// 显示并聚焦主窗口：隐藏到托盘、最小化或再次启动时唤回
 fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN) {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -74,7 +75,15 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    // 单实例：后启动的进程把命令行交给已在跑的那个后立刻退出，不再出现第二个窗口与托盘图标。
+    // 插件必须第一个注册，回调在已有实例里跑，负责把窗口从托盘或最小化状态叫回来
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        show_main(app);
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_opener::init())
         .manage(cli::CliProcesses::default())
         .invoke_handler(tauri::generate_handler![
