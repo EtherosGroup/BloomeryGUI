@@ -563,3 +563,16 @@ export interface CliImportReport {
     selected: { folder: string | null; instance: string | null; account: string | null }
     warnings: string[]
 }
+
+/** import 不带目录时的探测结果，CLI 1.16.0 起 */
+export interface CliHmclCandidate {
+    path: string
+    /** 相对路径的基准目录 */
+    base: string
+    /** local = 便携安装的数据，user = 按平台的用户数据 */
+    kind: 'local' | 'user'
+    folders: number
+    accounts: number
+    /** 目录最后改动时间（毫秒），读不到为 null */
+    modified: number | null
+}

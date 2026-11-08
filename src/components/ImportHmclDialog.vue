@@ -2,10 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
+import GroupCheckboxGroup from '@/components/GroupCheckboxGroup.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import { useCli } from '@/composables/useCli'
-import type { CliImportReport, CliImportSkipped } from '@/api/types'
+import type { CliHmclCandidate, CliImportReport, CliImportSkipped } from '@/api/types'
+import type { ChoiceOptionType } from '@/types/ChoiceOptionType'
 import type { PopupWindowButton } from '@/types/PopupWindowButton'
 import { meetsVersion } from '@/utils/meetsVersion'
 import { notifyError } from '@/utils/notify'
@@ -21,23 +23,33 @@ const REASON_LABEL: Record<string, string> = {
     credential: '凭据未迁移',
 }
 
+const KIND_LABEL: Record<CliHmclCandidate['kind'], string> = {
+    local: '便携数据',
+    user: '用户数据',
+}
+
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ imported: [] }>()
 
 const { client } = useCli()
 
-const target = ref('')
+/** 手动指定的目录：填了它就只导这一处，勾选列表忽略 */
+const manual = ref('')
 const busy = ref(false)
 const checking = ref(false)
 const cliVersion = ref('')
 const tooOld = ref(false)
+/** 这个 CLI 不认「不带目录的 import」时只留手动输入 */
+const detectFailed = ref(false)
+const candidates = ref<CliHmclCandidate[]>([])
+const selected = ref<string[]>([])
 const failure = ref<{
     code: string
     message: string
     detail: string | null
     retryable: boolean
 } | null>(null)
-const report = ref<CliImportReport | null>(null)
+const reports = ref<CliImportReport[]>([])
 
 function toFailure(error: unknown): NonNullable<typeof failure.value> {
     return error instanceof BloomeryError
@@ -51,15 +63,18 @@ function toFailure(error: unknown): NonNullable<typeof failure.value> {
 }
 
 function reset(): void {
-    target.value = ''
+    manual.value = ''
     busy.value = false
     cliVersion.value = ''
     tooOld.value = false
+    detectFailed.value = false
+    candidates.value = []
+    selected.value = []
     failure.value = null
-    report.value = null
+    reports.value = []
 }
 
-/** 打开时先看 CLI 版本：太旧只能提示升级，run 一定 UnknownCommand */
+/** 打开时先看 CLI 版本，再看它自己找到了几处 HMCL 数据 */
 watch(open, async (visible) => {
     if (!visible) {
         return
@@ -70,6 +85,21 @@ watch(open, async (visible) => {
         const info = await (await client()).probe()
         cliVersion.value = info.version
         tooOld.value = !meetsVersion(info.version, REQUIRED_CLI_VERSION)
+        if (tooOld.value) {
+            return
+        }
+        // 不按版本号猜：老 CLI 的 import 缺位置参数会报 UsageError，那就退回手动输入
+        try {
+            const found = await (
+                await client()
+            ).run<{ candidates: CliHmclCandidate[] }>(['import'], { progress: false })
+            candidates.value = found.candidates
+            // 找到的都先勾上：只想导其中一处的话取消其余即可
+            selected.value = found.candidates.map((item) => item.path)
+        } catch {
+            detectFailed.value = true
+            candidates.value = []
+        }
     } catch (error) {
         failure.value = toFailure(error)
     } finally {
@@ -77,32 +107,53 @@ watch(open, async (visible) => {
     }
 })
 
+const candidateOptions = computed<ChoiceOptionType[]>(() =>
+    candidates.value.map((item) => ({
+        value: item.path,
+        label: `${item.path} · ${KIND_LABEL[item.kind]} · 文件夹 ${item.folders} · 账号 ${item.accounts}`,
+    })),
+)
+
+/** 手动填的优先，否则用勾选的那些 */
+const targets = computed<string[]>(() => {
+    const typed = manual.value.trim()
+    return typed.length > 0 ? [typed] : selected.value
+})
+
 async function runImport(dryRun: boolean): Promise<void> {
-    const path = target.value.trim()
-    if (path.length === 0) {
-        notifyError('路径为空')
+    const paths = targets.value
+    if (paths.length === 0) {
+        notifyError('先勾选一个数据目录，或手动填一个')
         return
     }
     if (tooOld.value) {
         notifyError(`CLI 版本 ${cliVersion.value} 低于 ${REQUIRED_CLI_VERSION}，导入会报命令不存在`)
+        return
     }
     if (busy.value) {
         return
     }
     busy.value = true
     failure.value = null
-    report.value = null
+    reports.value = []
     try {
-        const args = ['import', path]
-        if (dryRun) {
-            args.push('--dry-run')
+        const instance = await client()
+        const done: CliImportReport[] = []
+        // 一处一处来：每次 import 只认一个数据目录，失败不影响后面的
+        for (const path of paths) {
+            const args = ['import', path]
+            if (dryRun) {
+                args.push('--dry-run')
+            }
+            done.push(await instance.run<CliImportReport>(args, { progress: false }))
         }
-        report.value = await (await client()).run<CliImportReport>(args, { progress: false })
+        reports.value = done
         if (!dryRun) {
             emit('imported')
         }
     } catch (error) {
         failure.value = toFailure(error)
+        reports.value = []
     } finally {
         busy.value = false
     }
@@ -118,16 +169,13 @@ const failureLabel = computed(() => {
     return row === null ? '' : errorSummary(row.code, row.message, row.retryable)
 })
 
-const selectedText = computed(() => {
-    const row = report.value?.selected
-    if (row === undefined) {
-        return ''
-    }
+function selectedText(report: CliImportReport): string {
+    const row = report.selected
     const parts = [row.folder, row.instance, row.account].filter(
         (item): item is string => item !== null && item.length > 0,
     )
     return parts.length === 0 ? '保持原样' : parts.join(' · ')
-})
+}
 
 /** 跳过项按原因归并成一行，别把每条都铺开 */
 function skippedText(rows: CliImportSkipped[]): string {
@@ -148,26 +196,40 @@ function skippedText(rows: CliImportSkipped[]): string {
     <PopupWindow
         v-model:open="open"
         title="导入 HMCL 数据"
-        context="从 HMCL 3.16+ 数据目录搬游戏文件夹、Java 与离线账号"
+        context="自动找 HMCL 的数据目录，勾哪儿导哪儿"
         :buttons="buttons"
     >
         <div class="import">
-            <p v-if="checking" class="import__note">检测 CLI 版本…</p>
+            <p v-if="checking" class="import__note">检测 CLI 版本与 HMCL 数据目录…</p>
             <p v-else-if="tooOld" class="import__warn">
                 CLI 版本 {{ cliVersion }} 低于
                 {{ REQUIRED_CLI_VERSION }}，导入会报命令不存在，请先升级
             </p>
 
-            <GroupInput
-                v-model="target"
-                label="HMCL 数据目录"
-                placeholder="如 ~/.local/share/hmcl"
-                :disabled="busy"
-            />
-            <p class="import__note">
-                自动识别 local home / user home / local-stable 布局；相对路径按家目录解析。
-            </p>
-            <p v-if="busy" class="import__note">正在处理，逐个探测 Java 可能需要几秒…</p>
+            <template v-else>
+                <GroupCheckboxGroup
+                    v-if="candidates.length > 0"
+                    v-model="selected"
+                    label="找到的 HMCL 数据目录"
+                    :options="candidateOptions"
+                    :disabled="busy"
+                />
+                <p v-else-if="detectFailed" class="import__note">
+                    这个 CLI 版本不能自动找目录，请在下面手动填一个。
+                </p>
+                <p v-else class="import__note">没自动找到 HMCL 数据目录，请在下面手动填一个。</p>
+
+                <GroupInput
+                    v-model="manual"
+                    label="手动指定目录（留空则用勾选的）"
+                    placeholder="如 D:\.hmcl"
+                    :disabled="busy"
+                />
+                <p class="import__note">
+                    勾选多个就逐个导入，每个目录各写一次；两处 HMCL 的数据互不相干。
+                </p>
+                <p v-if="busy" class="import__note">正在处理，逐个探测 Java 可能需要几秒…</p>
+            </template>
 
             <p v-if="failure" class="import__failure">
                 <span class="import__failure-code">{{ failureLabel }}</span>
@@ -176,11 +238,11 @@ function skippedText(rows: CliImportSkipped[]): string {
                 </span>
             </p>
 
-            <div v-if="report" class="import__report">
+            <div v-for="report in reports" :key="report.source.path" class="import__report">
                 <p class="import__banner">
-                    {{ report.dryRun ? '试运行：未写入任何数据' : '导入完成' }}
+                    {{ report.dryRun ? '试运行：未写入任何数据' : '导入完成' }} ·
+                    {{ report.source.path }}
                 </p>
-                <p class="import__note">{{ report.source.path }}</p>
 
                 <section class="import__block">
                     <p class="import__title">
@@ -220,7 +282,7 @@ function skippedText(rows: CliImportSkipped[]): string {
 
                 <section class="import__block">
                     <p class="import__title">选中状态</p>
-                    <p class="import__row">{{ selectedText }}</p>
+                    <p class="import__row">{{ selectedText(report) }}</p>
                 </section>
 
                 <section v-if="report.warnings.length > 0" class="import__block">
@@ -288,7 +350,7 @@ function skippedText(rows: CliImportSkipped[]): string {
     flex-direction: column;
     gap: 0.5rem;
 
-    padding-top: 0.2rem;
+    padding-top: 0.4rem;
 
     border-top: 1px solid color-mix(in srgb, var(--text-color) 14%, transparent);
 }
@@ -298,6 +360,7 @@ function skippedText(rows: CliImportSkipped[]): string {
 
     font-size: var(--font-size-sm);
     font-weight: 600;
+    word-break: break-all;
 }
 
 .import__block {
