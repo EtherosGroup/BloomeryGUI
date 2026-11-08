@@ -274,6 +274,26 @@ export const useVersionService = defineStore('VersionService', () => {
         }
     }
 
+    /** 从列表移除游戏文件夹：只写 setting.json，磁盘上的文件与回收站都不碰 */
+    async function removeFolder(folderId: string): Promise<boolean> {
+        if (folderId.length === 0 || foldersLoading.value) {
+            return false
+        }
+        foldersLoading.value = true
+        foldersFailure.value = null
+        try {
+            const client = await useCli().client()
+            await client.run(['folder', 'remove', folderId], { progress: false })
+            await loadFolders()
+            return foldersFailure.value === null
+        } catch (error) {
+            foldersFailure.value = toFailure(error)
+            return false
+        } finally {
+            foldersLoading.value = false
+        }
+    }
+
     /** 添加游戏文件夹：只写 setting.json，加完重列 */
     async function addFolder(path: string): Promise<AddedFolder | null> {
         const target = path.trim()
@@ -429,6 +449,7 @@ export const useVersionService = defineStore('VersionService', () => {
         ensureFresh,
         select,
         setCurrentFolder,
+        removeFolder,
         addFolder,
         removeInstance,
         loadRemoved,
