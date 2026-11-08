@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
+import FolderPathPicker from '@/components/FolderPathPicker.vue'
 import GroupCheckboxGroup from '@/components/GroupCheckboxGroup.vue'
-import GroupInput from '@/components/GroupInput.vue'
 import PopupWindow from '@/components/PopupWindow.vue'
 import { useCli } from '@/composables/useCli'
 import type { CliHmclCandidate, CliImportReport, CliImportSkipped } from '@/api/types'
@@ -219,10 +219,11 @@ function skippedText(rows: CliImportSkipped[]): string {
                 </p>
                 <p v-else class="import__note">没自动找到 HMCL 数据目录，请在下面手动填一个。</p>
 
-                <GroupInput
+                <FolderPathPicker
                     v-model="manual"
                     label="手动指定目录（留空则用勾选的）"
                     placeholder="如 D:\.hmcl"
+                    title="选择 HMCL 数据目录"
                     :disabled="busy"
                 />
                 <p class="import__note">
