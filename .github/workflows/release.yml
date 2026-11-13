@@ -40,10 +40,11 @@ jobs:
                       bundles: 'deb'
                       build_args: ''
                     # 通用二进制：Intel 与 Apple Silicon 同一份产物，一台运行器编两个切片
-                    # macos-14 在公共仓库是 Apple Silicon 运行器；私有仓库若无 arm64 运行器，
-                    # 换任意可用的 macOS 运行器即可（通用目标支持在 Intel 运行器上交叉编译）
+                    # macOS 运行器用 macos-15（公共仓库是 Apple Silicon）；macos-14 已于 2026-11 退役，
+                    # 队列直接拒单（The configuration 'macos-14-arm64-us-default' is not supported）
+                    # 私有仓库若无 arm64 运行器，换任意可用的 macOS 运行器即可（通用目标支持在 Intel 运行器上交叉编译）
                     # bundles 必须带 app：Tauri 只打 dmg 时会把 .app 清理掉，zip 就没有内容可压
-                    - os: macos-14
+                    - os: macos-15
                       platform: macos-universal
                       bundles: 'app,dmg'
                       build_args: '--target universal-apple-darwin'
@@ -314,7 +315,7 @@ jobs:
                       platform: linux-x64
                     - os: windows-2022
                       platform: windows-x64
-                    - os: macos-14
+                    - os: macos-15
                       platform: macos-universal
         runs-on: ${{ matrix.os }}
         timeout-minutes: 25

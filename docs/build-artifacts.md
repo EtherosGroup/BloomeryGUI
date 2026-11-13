@@ -44,8 +44,8 @@ macOS 为 `-macos-universal.dmg` / `-macos-universal.zip`。改名后的附件�
   路径含 `universal-apple-darwin` 的那个，并把候选清单打进步骤日志；Tauri 升级或布局变化时
   不会因“路径对不上”而静默失败
 - 最低系统版本 `10.15`（`bundle.macOS.minimumSystemVersion`）；Apple Silicon 需 11+
-- CI 用 `macos-14` 运行器；通用目标不挑运行器架构，私有仓库若无 arm64 运行器，换成任意可用的
-  macOS 运行器即可（在 Intel 运行器上交叉编译 arm64 切片）
+- CI 用 `macos-15` 运行器（`macos-14` 已于 2026-11 退役，队列直接拒单）；通用目标不挑运行器架构，
+  私有仓库若无 arm64 运行器，换成任意可用的 macOS 运行器即可（在 Intel 运行器上交叉编译 arm64 切片）
 - dmg 文件名已实测（v1.7.0 日志）：`bloomery-gui_1.7.0_universal.dmg`，与登记的
   `bloomery-gui_<版本>_universal.dmg` 一致
 
