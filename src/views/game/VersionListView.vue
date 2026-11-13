@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { PhGear, PhPlay } from '@phosphor-icons/vue'
+import { PhGear, PhPlay, PhTrash } from '@phosphor-icons/vue'
 import CollapsibleGroup from '@/components/CollapsibleGroup.vue'
 import GameLaunching from '@/components/GameLaunching.vue'
 import Spinner from '@/components/Spinner.vue'
 import GroupButton from '@/components/GroupButton.vue'
+import FolderPathPicker from '@/components/FolderPathPicker.vue'
 import GroupInput from '@/components/GroupInput.vue'
 import GroupSwitch from '@/components/GroupSwitch.vue'
 import ImportHmclDialog from '@/components/ImportHmclDialog.vue'
@@ -17,6 +18,8 @@ import { errorSummary } from '@/api/errorMessages'
 import type { CliFolder, CliInstance, CliLaunchResult } from '@/api/types'
 import { useLaunchService } from '@/stores/LaunchService'
 import type { PopupMenuItem } from '@/components/PopupMenu.vue'
+import type { ImportSummary } from '@/types/ImportSummary'
+import type { PopupWindowButton } from '@/types/PopupWindowButton'
 import {
     gameVersionLabel,
     lastPlayedLabel,
@@ -139,11 +142,19 @@ async function refresh(): Promise<void> {
     await loadRemoved()
 }
 
-/** 导入 HMCL 数据后：文件夹、实例、账号都要重取 */
-async function afterImport(): Promise<void> {
+/** 导入 HMCL 数据后：文件夹、实例、账号都要重取，部分失败也刷新 */
+async function afterImport(summary: ImportSummary): Promise<void> {
     await refresh()
     await accountService.load()
-    notifySuccess('已导入 HMCL 数据')
+    if (summary.failed === 0) {
+        notifySuccess(`已导入 HMCL 数据 · ${summary.succeeded} 处`)
+        return
+    }
+    if (summary.succeeded === 0) {
+        notifyError(`导入失败 · ${summary.failed} 处`)
+        return
+    }
+    notifyError(`已导入 ${summary.succeeded} 处，${summary.failed} 处失败`)
 }
 
 async function setCurrent(folder: CliFolder): Promise<void> {
@@ -154,6 +165,53 @@ async function setCurrent(folder: CliFolder): Promise<void> {
         return
     }
     notifySuccess(`当前文件夹 · ${folder.name}`)
+}
+
+const removeOpen = ref(false)
+const removeTarget = ref<CliFolder | null>(null)
+const removing = ref(false)
+
+/** 点垃圾桶：先问一句，确认后只从列表里拿掉 */
+function askRemove(folder: CliFolder): void {
+    removeTarget.value = folder
+    removeOpen.value = true
+}
+
+const removeButtons = computed<PopupWindowButton[]>(() => [
+    { label: '取消' },
+    { label: removing.value ? '移除中…' : '移除', onClick: confirmRemove },
+])
+
+/** 从列表移除：不删磁盘文件，也不进回收站 */
+async function confirmRemove(): Promise<void> {
+    const folder = removeTarget.value
+    if (folder === null || removing.value) {
+        return
+    }
+    removing.value = true
+    try {
+        const failure = await versionService.removeFolder(folder.id)
+        if (failure !== null) {
+            notifyError(errorSummary(failure.code, failure.message, failure.retryable))
+            return
+        }
+        notifySuccess(`已从列表移除 · ${folder.name}`)
+        removeOpen.value = false
+        removeTarget.value = null
+        // 移除已经生效；列表没刷新只是视图旧了，不算移除失败
+        const reloadFailure = versionService.foldersFailure
+        if (reloadFailure !== null) {
+            notifyError(
+                `移除已生效，但列表没刷新：${errorSummary(reloadFailure.code, reloadFailure.message, reloadFailure.retryable)}`,
+            )
+        }
+        const next = versionService.currentFolderId
+        if (next.length > 0) {
+            await versionService.loadList(next)
+        }
+    } finally {
+        removing.value = false
+    }
 }
 
 const addOpen = ref(false)
@@ -430,10 +488,21 @@ onMounted(async () => {
                 <GroupButton
                     v-else
                     variant="ghost"
+                    class="versions__folder-current"
                     :disabled="versionService.foldersLoading"
                     @click="setCurrent(folder)"
                 >
                     设为当前选中
+                </GroupButton>
+                <GroupButton
+                    variant="danger"
+                    class="versions__folder-remove"
+                    :disabled="versionService.foldersLoading"
+                    :aria-label="`从列表移除 ${folder.name}`"
+                    title="从列表移除（不删除磁盘文件）"
+                    @click="askRemove(folder)"
+                >
+                    <PhTrash :size="18" weight="regular" aria-hidden="true" />
                 </GroupButton>
             </div>
 
@@ -577,6 +646,14 @@ onMounted(async () => {
             </div>
         </PopupWindow>
 
+        <PopupWindow v-model:open="removeOpen" title="移除游戏文件夹" :buttons="removeButtons">
+            <p class="versions__confirm-note">
+                将从列表里移除「{{
+                    removeTarget?.name
+                }}」。磁盘上的文件不会被删除，也不会移到回收站。
+            </p>
+        </PopupWindow>
+
         <PopupWindow v-model:open="dryRunOpen" title="启动命令" context="--dry-run，不会启动进程">
             <pre class="versions__command">{{ dryRunText }}</pre>
         </PopupWindow>
@@ -591,10 +668,11 @@ onMounted(async () => {
             ]"
         >
             <div class="versions__confirm">
-                <GroupInput
+                <FolderPathPicker
                     v-model="addPath"
                     label="路径"
                     placeholder="含 versions/ 的游戏目录"
+                    title="选择游戏文件夹"
                     :disabled="adding"
                 />
             </div>
@@ -707,6 +785,25 @@ onMounted(async () => {
 .versions__folder-name {
     font-size: var(--font-size-lg);
     font-weight: 600;
+}
+
+.versions__confirm-note {
+    max-width: 34rem;
+    margin: 0;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+}
+
+/* 两个按钮同高、同一条水平线 */
+.versions__folder-current,
+.versions__folder-remove {
+    align-self: center;
+}
+
+.versions__folder-remove {
+    padding: 0.4rem 0.6rem;
 }
 
 .versions__folder-path {

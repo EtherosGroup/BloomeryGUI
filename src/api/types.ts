@@ -563,3 +563,20 @@ export interface CliImportReport {
     selected: { folder: string | null; instance: string | null; account: string | null }
     warnings: string[]
 }
+
+/**
+ * import 不带目录时的候选列表，CLI 1.17.0 起才有
+ *
+ * 1.16.0 的 import 仍要求必填位置参数，不带目录会以 UsageError 退出
+ */
+export interface CliHmclCandidate {
+    path: string
+    /** 相对路径的基准目录 */
+    base: string
+    /** local = 便携安装的数据，user = 按平台的用户数据 */
+    kind: 'local' | 'user'
+    folders: number
+    accounts: number
+    /** 目录最后改动时间（毫秒），读不到为 null */
+    modified: number | null
+}

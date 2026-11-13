@@ -85,6 +85,7 @@ pub fn run() {
 
     let app = builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(cli::CliProcesses::default())
         .invoke_handler(tauri::generate_handler![
             greet,
