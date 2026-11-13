@@ -274,24 +274,35 @@ export const useVersionService = defineStore('VersionService', () => {
         }
     }
 
-    /** 从列表移除游戏文件夹：只写 setting.json，磁盘上的文件与回收站都不碰 */
-    async function removeFolder(folderId: string): Promise<boolean> {
-        if (folderId.length === 0 || foldersLoading.value) {
-            return false
+    /**
+     * 从列表移除游戏文件夹：只写 setting.json，磁盘上的文件与回收站都不碰
+     *
+     * 返回 null 表示移除已经生效；之后重列失败只说明列表没刷新，去 foldersFailure 里看
+     */
+    async function removeFolder(folderId: string): Promise<VersionFailure | null> {
+        if (folderId.length === 0) {
+            return { code: 'Unknown', message: '没有文件夹', detail: null, retryable: false }
+        }
+        if (foldersLoading.value) {
+            return {
+                code: 'Unknown',
+                message: '列表正在刷新，请稍后再试',
+                detail: null,
+                retryable: true,
+            }
         }
         foldersLoading.value = true
-        foldersFailure.value = null
         try {
             const client = await useCli().client()
             await client.run(['folder', 'remove', folderId], { progress: false })
-            await loadFolders()
-            return foldersFailure.value === null
         } catch (error) {
-            foldersFailure.value = toFailure(error)
-            return false
-        } finally {
             foldersLoading.value = false
+            return toFailure(error)
         }
+        foldersLoading.value = false
+        // 移除已经写进去过一次了：这里只刷新列表，失败不该被当成移除失败
+        await loadFolders()
+        return null
     }
 
     /** 添加游戏文件夹：只写 setting.json，加完重列 */

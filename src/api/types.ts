@@ -564,7 +564,11 @@ export interface CliImportReport {
     warnings: string[]
 }
 
-/** import 不带目录时的探测结果，CLI 1.16.0 起 */
+/**
+ * import 不带目录时的候选列表，CLI 1.17.0 起才有
+ *
+ * 1.16.0 的 import 仍要求必填位置参数，不带目录会以 UsageError 退出
+ */
 export interface CliHmclCandidate {
     path: string
     /** 相对路径的基准目录 */

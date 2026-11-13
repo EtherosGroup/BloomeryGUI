@@ -8,12 +8,15 @@ import PopupWindow from '@/components/PopupWindow.vue'
 import { useCli } from '@/composables/useCli'
 import type { CliHmclCandidate, CliImportReport, CliImportSkipped } from '@/api/types'
 import type { ChoiceOptionType } from '@/types/ChoiceOptionType'
+import type { ImportFailure, ImportSummary } from '@/types/ImportSummary'
 import type { PopupWindowButton } from '@/types/PopupWindowButton'
 import { meetsVersion } from '@/utils/meetsVersion'
 import { notifyError } from '@/utils/notify'
 
-/** import 命令从 CLI 1.16.0 起才有 */
+/** 带目录的 import 从 CLI 1.16.0 起才有 */
 const REQUIRED_CLI_VERSION = '1.16.0'
+/** 不带目录的 import（列出候选）从 CLI 1.17.0 起才有，1.16.0 的目录参数还是必填 */
+const DETECT_CLI_VERSION = '1.17.0'
 
 const REASON_LABEL: Record<string, string> = {
     exists: '已存在',
@@ -29,7 +32,7 @@ const KIND_LABEL: Record<CliHmclCandidate['kind'], string> = {
 }
 
 const open = defineModel<boolean>('open', { default: false })
-const emit = defineEmits<{ imported: [] }>()
+const emit = defineEmits<{ imported: [summary: ImportSummary] }>()
 
 const { client } = useCli()
 
@@ -50,6 +53,8 @@ const failure = ref<{
     retryable: boolean
 } | null>(null)
 const reports = ref<CliImportReport[]>([])
+/** 逐个目录导入时没导成的那些，成功的仍留在 reports 里 */
+const failed = ref<ImportFailure[]>([])
 
 function toFailure(error: unknown): NonNullable<typeof failure.value> {
     return error instanceof BloomeryError
@@ -72,6 +77,7 @@ function reset(): void {
     selected.value = []
     failure.value = null
     reports.value = []
+    failed.value = []
 }
 
 /** 打开时先看 CLI 版本，再看它自己找到了几处 HMCL 数据 */
@@ -88,7 +94,11 @@ watch(open, async (visible) => {
         if (tooOld.value) {
             return
         }
-        // 不按版本号猜：老 CLI 的 import 缺位置参数会报 UsageError，那就退回手动输入
+        // 候选探测是 1.17.0 才有的能力；1.16.0 的 import 连目录都还是必填，别白调一次
+        if (!meetsVersion(info.version, DETECT_CLI_VERSION)) {
+            detectFailed.value = true
+            return
+        }
         try {
             const found = await (
                 await client()
@@ -96,9 +106,14 @@ watch(open, async (visible) => {
             candidates.value = found.candidates
             // 找到的都先勾上：只想导其中一处的话取消其余即可
             selected.value = found.candidates.map((item) => item.path)
-        } catch {
-            detectFailed.value = true
-            candidates.value = []
+        } catch (error) {
+            // 版本已经够了还报 UsageError，才是真的不认识这个子命令；其余照常报出来
+            if (error instanceof BloomeryError && error.code === 'UsageError') {
+                detectFailed.value = true
+                candidates.value = []
+                return
+            }
+            failure.value = toFailure(error)
         }
     } catch (error) {
         failure.value = toFailure(error)
@@ -136,24 +151,36 @@ async function runImport(dryRun: boolean): Promise<void> {
     busy.value = true
     failure.value = null
     reports.value = []
+    failed.value = []
     try {
-        const instance = await client()
+        // 连 CLI 都起不来是整体失败，和某个目录导不进去不是一回事
+        const instance = await client().catch((error: unknown) => {
+            failure.value = toFailure(error)
+            return null
+        })
+        if (instance === null) {
+            return
+        }
         const done: CliImportReport[] = []
-        // 一处一处来：每次 import 只认一个数据目录，失败不影响后面的
+        const errors: ImportFailure[] = []
+        // 一处一处来：每次 import 只认一个数据目录；某个目录失败不能丢掉已经写进去的那些
         for (const path of paths) {
             const args = ['import', path]
             if (dryRun) {
                 args.push('--dry-run')
             }
-            done.push(await instance.run<CliImportReport>(args, { progress: false }))
+            try {
+                done.push(await instance.run<CliImportReport>(args, { progress: false }))
+            } catch (error) {
+                errors.push({ path, ...toFailure(error) })
+            }
         }
         reports.value = done
-        if (!dryRun) {
-            emit('imported')
+        failed.value = errors
+        // 真写进去过东西就得让父页面重取；失败的那些留在弹窗里让人看清
+        if (!dryRun && done.length > 0) {
+            emit('imported', { succeeded: done.length, failed: errors.length })
         }
-    } catch (error) {
-        failure.value = toFailure(error)
-        reports.value = []
     } finally {
         busy.value = false
     }
@@ -227,7 +254,7 @@ function skippedText(rows: CliImportSkipped[]): string {
                     :disabled="busy"
                 />
                 <p class="import__note">
-                    勾选多个就逐个导入，每个目录各写一次；两处 HMCL 的数据互不相干。
+                    勾选多个就逐个导入，每个目录各写一次；某一处失败不影响其它处已写入的数据。
                 </p>
                 <p v-if="busy" class="import__note">正在处理，逐个探测 Java 可能需要几秒…</p>
             </template>
@@ -238,6 +265,17 @@ function skippedText(rows: CliImportSkipped[]): string {
                     {{ failure.detail }}
                 </span>
             </p>
+
+            <div v-if="failed.length > 0" class="import__failed">
+                <p class="import__failed-title">这些目录没导成</p>
+                <p v-for="row in failed" :key="row.path" class="import__failed-row">
+                    <span class="import__failure-code">{{
+                        errorSummary(row.code, row.message, row.retryable)
+                    }}</span>
+                    · {{ row.path }}
+                    <span v-if="row.detail" class="import__failure-detail">{{ row.detail }}</span>
+                </p>
+            </div>
 
             <div v-for="report in reports" :key="report.source.path" class="import__report">
                 <p class="import__banner">
@@ -343,6 +381,34 @@ function skippedText(rows: CliImportSkipped[]): string {
 
 .import__failure-detail {
     color: var(--text-color-dark);
+    word-break: break-all;
+}
+
+.import__failed {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+
+    background-color: color-mix(in srgb, #c62828 12%, transparent);
+    border: 1px solid color-mix(in srgb, #c62828 35%, transparent);
+    border-radius: var(--border-radius);
+}
+
+.import__failed-title {
+    margin: 0;
+
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.import__failed-row {
+    margin: 0;
+
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
     word-break: break-all;
 }
 

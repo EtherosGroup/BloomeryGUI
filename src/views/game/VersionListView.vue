@@ -18,6 +18,7 @@ import { errorSummary } from '@/api/errorMessages'
 import type { CliFolder, CliInstance, CliLaunchResult } from '@/api/types'
 import { useLaunchService } from '@/stores/LaunchService'
 import type { PopupMenuItem } from '@/components/PopupMenu.vue'
+import type { ImportSummary } from '@/types/ImportSummary'
 import type { PopupWindowButton } from '@/types/PopupWindowButton'
 import {
     gameVersionLabel,
@@ -141,11 +142,19 @@ async function refresh(): Promise<void> {
     await loadRemoved()
 }
 
-/** 导入 HMCL 数据后：文件夹、实例、账号都要重取 */
-async function afterImport(): Promise<void> {
+/** 导入 HMCL 数据后：文件夹、实例、账号都要重取，部分失败也刷新 */
+async function afterImport(summary: ImportSummary): Promise<void> {
     await refresh()
     await accountService.load()
-    notifySuccess('已导入 HMCL 数据')
+    if (summary.failed === 0) {
+        notifySuccess(`已导入 HMCL 数据 · ${summary.succeeded} 处`)
+        return
+    }
+    if (summary.succeeded === 0) {
+        notifyError(`导入失败 · ${summary.failed} 处`)
+        return
+    }
+    notifyError(`已导入 ${summary.succeeded} 处，${summary.failed} 处失败`)
 }
 
 async function setCurrent(folder: CliFolder): Promise<void> {
@@ -181,17 +190,21 @@ async function confirmRemove(): Promise<void> {
     }
     removing.value = true
     try {
-        const done = await versionService.removeFolder(folder.id)
-        const failure = versionService.foldersFailure
-        if (!done) {
-            if (failure !== null) {
-                notifyError(errorSummary(failure.code, failure.message, failure.retryable))
-            }
+        const failure = await versionService.removeFolder(folder.id)
+        if (failure !== null) {
+            notifyError(errorSummary(failure.code, failure.message, failure.retryable))
             return
         }
         notifySuccess(`已从列表移除 · ${folder.name}`)
         removeOpen.value = false
         removeTarget.value = null
+        // 移除已经生效；列表没刷新只是视图旧了，不算移除失败
+        const reloadFailure = versionService.foldersFailure
+        if (reloadFailure !== null) {
+            notifyError(
+                `移除已生效，但列表没刷新：${errorSummary(reloadFailure.code, reloadFailure.message, reloadFailure.retryable)}`,
+            )
+        }
         const next = versionService.currentFolderId
         if (next.length > 0) {
             await versionService.loadList(next)
