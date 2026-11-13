@@ -85,7 +85,7 @@ macOS 图标是 `src-tauri/icons/icon.icns`，由仓库里的几档 PNG 拼出�
 `APPLE_SIGNING_IDENTITY` 等环境变量覆盖即可。最低支持 macOS 10.15
 （`bundle.macOS.minimumSystemVersion`），Apple Silicon 需 11+。
 
-运行前提：GUI 首次启动会探测 Node.js（>= 22）与 `bloomery` CLI（`npm install -g bloomery`）。
+运行前提：GUI 首次启动会探测 Node.js（>= 22）与 `bloomery` CLI（`npm install -g @etheros/bloomery`，装出来的命令仍是 `bloomery`）。
 macOS 上装了 Homebrew 时可在配置页直接用它装 Node.js；没有 Homebrew 时配置页给出可复制的终端命令。
 
 ## 自检脚本

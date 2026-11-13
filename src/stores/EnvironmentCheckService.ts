@@ -41,7 +41,9 @@ export interface UpdateOutcome {
 }
 
 const NODE_INDEX = 'https://nodejs.org/dist/index.json'
-const BLOOMERY_LATEST = 'https://registry.npmjs.org/bloomery/latest'
+/** npm 包名：CLI 1.17.1 起从 bloomery 改为 @etheros/bloomery，装出来的命令仍是 bloomery */
+const BLOOMERY_PACKAGE = '@etheros/bloomery'
+const BLOOMERY_LATEST = `https://registry.npmjs.org/${BLOOMERY_PACKAGE.replace('/', '%2F')}/latest`
 
 /** 从任意输出里取第一段 x.y.z */
 function semver(text: string): string {
@@ -204,7 +206,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
 
     /** 安装或更新 Bloomery 的命令：实际执行与界面展示共用，避免两处写法漂移 */
     function bloomeryInstallCommand(manager: 'npm' | 'pnpm'): string {
-        const spec = `bloomery${bloomeryVersionSuffix.value}`
+        const spec = `${BLOOMERY_PACKAGE}${bloomeryVersionSuffix.value}`
         return manager === 'pnpm' ? `pnpm add -g ${spec}` : `npm install -g ${spec}`
     }
 
@@ -318,7 +320,7 @@ export const useEnvironmentCheckService = defineStore('EnvironmentCheckService',
     async function updateBloomery(manager: 'npm' | 'pnpm'): Promise<UpdateOutcome> {
         // 探测是启动时做的，命令里钉的版本要按现在的最新版来
         await refreshLatestBloomery()
-        const spec = `bloomery${bloomeryVersionSuffix.value}`
+        const spec = `${BLOOMERY_PACKAGE}${bloomeryVersionSuffix.value}`
         // 统一用 install 钉版本：npm update 只按已装时的范围升级，拿不到最新的情况很常见
         const args = manager === 'pnpm' ? ['add', '-g', spec] : ['install', '-g', spec]
         const command = `${manager} ${args.join(' ')}`
