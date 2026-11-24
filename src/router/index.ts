@@ -40,7 +40,7 @@ const routes = [
         name: 'setting',
         component: () => import('@/views/general/AppSetting.vue'),
         meta: {
-            title: '设置',
+            title: '通用',
         },
     },
     {

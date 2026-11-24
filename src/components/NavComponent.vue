@@ -70,10 +70,10 @@ const groups: NavGroup[] = [
     },
     {
         id: 'general',
-        label: '通用',
+        label: '设置',
         icon: PhGear,
         items: [
-            { label: '设置', to: '/setting' },
+            { label: '通用', to: '/setting' },
             { label: '引擎设置', to: '/setting/bloomery' },
             { label: '运行环境', to: '/info' },
         ],

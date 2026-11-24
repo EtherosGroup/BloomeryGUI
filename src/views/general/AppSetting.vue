@@ -112,7 +112,7 @@ onMounted(async () => {
 <template>
     <main class="app-setting">
         <header class="app-setting__head">
-            <h1 class="app-setting__title">设置</h1>
+            <h1 class="app-setting__title">通用</h1>
         </header>
 
         <CollapsibleGroup label="界面" default-open>
