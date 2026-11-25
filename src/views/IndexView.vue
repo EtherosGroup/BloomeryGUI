@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
 import { useCli } from '@/composables/useCli'
@@ -66,6 +67,7 @@ const appVersion = __APP_VERSION__
 const engineVersion = ref('')
 const engineFailure = ref('')
 const versionService = useVersionService()
+const router = useRouter()
 
 const instanceOptions = computed<ChoiceOptionType[]>(() =>
     versionService.instances.map((instance) => ({
@@ -80,6 +82,16 @@ const choice = computed<string>({
     get: () => versionService.selectedInstance ?? '',
     set: (value) => void switchInstance(value),
 })
+
+/** 当前选中实例的版本详细页 */
+function openDetail(): void {
+    const id = versionService.selectedInstance
+    if (id === null) {
+        return
+    }
+    const folderId = versionService.currentFolderId
+    void router.push(`/version/${encodeURIComponent(folderId)}/${encodeURIComponent(id)}/setting`)
+}
 
 async function switchInstance(id: string): Promise<void> {
     if (id.length === 0 || id === versionService.selectedInstance) {
@@ -221,6 +233,14 @@ watch(
                 <GroupLabel class="quick-start__instance">
                     {{ versionService.selectedInstance ?? '未选择实例' }}
                 </GroupLabel>
+                <GroupButton
+                    variant="ghost"
+                    block
+                    :disabled="versionService.selectedInstance === null"
+                    @click="openDetail"
+                >
+                    版本详情
+                </GroupButton>
                 <!-- 准备阶段：dry-run 期间无遮罩 -->
                 <p v-if="launchService.preparing" class="quick-start__busy">
                     <Spinner size="0.85rem" label="正在准备启动" />
