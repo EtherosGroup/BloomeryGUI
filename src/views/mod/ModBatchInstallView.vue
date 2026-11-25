@@ -437,7 +437,7 @@ onMounted(boot)
                     }}
                 </p>
 
-                <p v-if="mod.files.length === 0" class="mod__note">这个实例的 mods 目录是空的</p>
+                <p v-if="mod.files.length === 0" class="mod__note">mods 目录为空</p>
 
                 <template v-else>
                     <div class="mod__toolbar">

@@ -10,9 +10,12 @@ import { BloomeryError } from '@/api/bloomery'
 import { errorSummary } from '@/api/errorMessages'
 import { ensureDirectory } from '@/api/files'
 import { openPath } from '@/api/system'
-import type { CliInstance } from '@/api/types'
+import { MOD_API_REQUIRED, type CliInstance, type CliModFile } from '@/api/types'
 import { useCli } from '@/composables/useCli'
+import { loaderOf } from '@/composables/useModTarget'
+import { useModService, type ModScope } from '@/stores/ModService'
 import { useVersionService } from '@/stores/VersionService'
+import { sizeText, skipLabel } from '@/utils/modText'
 import { lastPlayedLabel, loaderLabel, stateLabel, versionTypeLabel } from '@/utils/versionLabel'
 import { notifyError, notifySuccess } from '@/utils/notify'
 
@@ -32,6 +35,7 @@ interface Failure {
 const route = useRoute()
 const router = useRouter()
 const versionService = useVersionService()
+const mod = useModService()
 const instanceId = computed(() => decodeURIComponent(String(route.params.instanceId ?? '')))
 /** 文件夹 id：路由里带就用它，旧的两段式链接回落到当前文件夹 */
 const folderFromRoute = computed(() => decodeURIComponent(String(route.params.folderId ?? '')))
@@ -153,7 +157,12 @@ async function refreshValues(): Promise<void> {
     instanceJvmArgs.value = await readArgs(instanceArgs(['jvmArgs']))
 }
 
-async function load(): Promise<void> {
+/**
+ * 读实例信息、配置值与 MOD 列表
+ *
+ * force 为真时丢 MOD 缓存，首屏与刷新共用
+ */
+async function load(force = false): Promise<void> {
     busy.value = true
     failure.value = null
     try {
@@ -172,6 +181,13 @@ async function load(): Promise<void> {
     } finally {
         busy.value = false
     }
+    // MOD 反查耗时，不并入配置项 busy
+    await loadMods(force)
+}
+
+/** 刷新：配置项重读，MOD 列表丢缓存 */
+async function reload(): Promise<void> {
+    await load(true)
 }
 
 function startEdit(value: number | null): void {
@@ -329,8 +345,185 @@ async function rename(): Promise<void> {
     }
 }
 
-onMounted(load)
-watch(instanceId, load)
+/* ---------- MOD ---------- */
+
+/** MOD 命令的目标实例，文件夹 id 与实例信息都到位才给 */
+const modScope = computed<ModScope | null>(() => {
+    const current = info.value
+    if (current === null || folderId.value.length === 0) {
+        return null
+    }
+    return {
+        folderId: folderId.value,
+        instanceId: current.id,
+        gameVersion: current.gameVersion,
+        loader: loaderOf(current),
+    }
+})
+
+/** 原版实例：MOD 装了也不加载 */
+const vanilla = computed(() => info.value !== null && loaderOf(info.value) === null)
+
+/** 引擎 api 达不到 MOD 命令的要求 */
+const modUnsupported = computed(() => mod.apiChecked && !mod.supported)
+const modApiText = computed(() => (mod.apiVersion === null ? '未知' : String(mod.apiVersion)))
+
+/** 本页实例的键，文件夹与实例一起定 */
+const modKey = computed(() => {
+    const current = modScope.value
+    return current === null ? '' : `${current.folderId}|${current.instanceId}`
+})
+
+/** 列表是否属于当前实例，ModService 是全局单例 */
+const modOwned = computed(() => {
+    const current = modScope.value
+    const owner = mod.listScope
+    if (current === null || owner === null) {
+        return false
+    }
+    return owner.folderId === current.folderId && owner.instanceId === current.instanceId
+})
+
+/** 行数据落地时的实例键 */
+const modRowsKey = ref('')
+
+/** 行可用：属于本实例，且扫描已落地 */
+const modReady = computed(() => modOwned.value && modRowsKey.value === modKey.value)
+
+// 扫描结束后记为当前实例
+watch(
+    () => mod.listLoading,
+    (loading) => {
+        if (!loading && modOwned.value) {
+            modRowsKey.value = modKey.value
+        }
+    },
+)
+
+/** 当前实例的行，列表属于别的实例时按空处理 */
+const modRows = computed(() => (modOwned.value ? mod.files : []))
+
+/** 列表读取中：换实例等待，或首读未出行 */
+const modLoading = computed(
+    () => !modReady.value || (mod.listLoading && modRows.value.length === 0),
+)
+
+const modEnabledFiles = computed(() => modRows.value.filter((row) => row.enabled))
+const modDisabledFiles = computed(() => modRows.value.filter((row) => !row.enabled))
+const modEnabledCount = computed(() => modEnabledFiles.value.length)
+const modDisabledCount = computed(() => modDisabledFiles.value.length)
+
+/** 反查进度，两段式读取的第二段 */
+const modResolveText = computed(() => {
+    const row = mod.resolveProgress
+    return row === null ? '反查项目名' : `反查项目名 ${row.done}/${row.total}`
+})
+
+/** 标题：项目中文名，其次项目名，最后文件名去后缀 */
+function modTitleOf(row: CliModFile): string {
+    const zh = row.project?.titleZh
+    if (zh !== undefined && zh !== null && zh.trim().length > 0) {
+        return zh.trim()
+    }
+    if (row.project !== null) {
+        return row.project.title
+    }
+    return row.filename.replace(/\.jar(\.disabled)?$/i, '')
+}
+
+/** 第二行：[项目名] · 版本 · 类型，与标题同名时省掉项目名 */
+function modSubtitleOf(row: CliModFile): string {
+    const parts: string[] = []
+    const english = row.project?.title
+    if (english !== undefined && english.length > 0 && english !== modTitleOf(row)) {
+        parts.push(`[${english}]`)
+    }
+    if (row.version !== null) {
+        parts.push(row.version.number, versionTypeLabel(row.version.type))
+    }
+    return parts.join(' · ')
+}
+
+function modFailureText(failure: { code: string; message: string; retryable: boolean }): string {
+    return errorSummary(failure.code, failure.message, failure.retryable)
+}
+
+/** 读已装列表：门禁过了才发命令 */
+async function loadMods(force: boolean): Promise<void> {
+    const scope = modScope.value
+    if (scope === null) {
+        return
+    }
+    const ok = await mod.checkApi()
+    if (!ok) {
+        return
+    }
+    await mod.loadList(scope, { force })
+    // 命中缓存时无扫描，行数据仍属本实例
+    if (modOwned.value) {
+        modRowsKey.value = modKey.value
+    }
+}
+
+/**
+ * 禁用 / 启用
+ *
+ * 目标取 mod list 给的 filename，后缀由 CLI 改
+ */
+async function toggleMods(action: 'disable' | 'enable', targets: string[]): Promise<void> {
+    const scope = modScope.value
+    const wanted = targets.filter((item) => item.length > 0)
+    if (scope === null || wanted.length === 0 || mod.mutating) {
+        return
+    }
+    const ok = await mod.mutate(action, scope, wanted)
+    const verb = action === 'disable' ? '禁用' : '启用'
+    if (!ok) {
+        const failure = mod.mutationFailure
+        if (failure !== null) {
+            notifyError(modFailureText(failure))
+        }
+        return
+    }
+    const report = mod.mutationReport
+    const changed = report?.changed.length ?? 0
+    const skipped = report?.skipped ?? []
+    if (skipped.length > 0) {
+        const head = `已${verb} ${changed} 个 · ${skipped.length} 个跳过`
+        const first = skipped[0]
+        notifyError(`${head} · ${first.target} ${skipLabel(first.reason)}`)
+        return
+    }
+    notifySuccess(`已${verb} ${changed} 个`)
+}
+
+/** 单条切换 */
+async function toggleMod(row: CliModFile): Promise<void> {
+    await toggleMods(row.enabled ? 'disable' : 'enable', [row.filename])
+}
+
+/** 一键禁用：只挑启用中的文件 */
+async function disableAll(): Promise<void> {
+    await toggleMods(
+        'disable',
+        modEnabledFiles.value.map((row) => row.filename),
+    )
+}
+
+/** 一键启用：只挑禁用中的文件 */
+async function enableAll(): Promise<void> {
+    await toggleMods(
+        'enable',
+        modDisabledFiles.value.map((row) => row.filename),
+    )
+}
+
+onMounted(() => {
+    void load()
+})
+watch(instanceId, () => {
+    void load()
+})
 </script>
 
 <template>
@@ -338,7 +531,7 @@ watch(instanceId, load)
         <header class="setting__head">
             <BackButton fallback="/version/list" />
             <h1 class="setting__title">{{ info?.name ?? instanceId }}</h1>
-            <GroupButton variant="ghost" :disabled="busy" @click="load">
+            <GroupButton variant="ghost" :disabled="busy" @click="reload">
                 {{ busy ? '读取中' : '刷新' }}
             </GroupButton>
         </header>
@@ -436,6 +629,115 @@ watch(instanceId, load)
                     </div>
                 </div>
                 <p class="setting__note">mod 与存档文件夹缺失时先建目录</p>
+            </CollapsibleGroup>
+
+            <CollapsibleGroup label="MOD" default-open>
+                <p v-if="modUnsupported" class="setting__failure">
+                    <span class="setting__failure-code">引擎版本过低</span>
+                    <span class="setting__failure-detail">
+                        当前引擎 api {{ modApiText }} · MOD 相关命令要 api {{ MOD_API_REQUIRED }}
+                        起 · 到「环境配置」更新引擎
+                    </span>
+                </p>
+
+                <p v-else-if="modScope === null" class="setting__note">
+                    缺少文件夹 id · 无法读取 MOD 列表
+                </p>
+
+                <p v-else-if="modLoading" class="setting__note">读取 MOD 列表</p>
+
+                <p v-else-if="mod.listFailure !== null" class="setting__failure">
+                    <span class="setting__failure-code">{{ modFailureText(mod.listFailure) }}</span>
+                    <span v-if="mod.listFailure.detail" class="setting__failure-detail">
+                        {{ mod.listFailure.detail }}
+                    </span>
+                </p>
+
+                <template v-else>
+                    <p class="setting__note">
+                        已装 {{ modRows.length }} 个 · 启用 {{ modEnabledCount }} 个 · 禁用
+                        {{ modDisabledCount }} 个{{
+                            mod.listResolving ? ` · ${modResolveText}` : ''
+                        }}
+                    </p>
+
+                    <p v-if="modRows.length === 0" class="setting__note">mods 目录为空</p>
+
+                    <template v-else>
+                        <div class="setting__actions">
+                            <GroupButton
+                                variant="ghost"
+                                :disabled="mod.mutating || modEnabledFiles.length === 0"
+                                @click="disableAll"
+                            >
+                                全部禁用
+                            </GroupButton>
+                            <GroupButton
+                                variant="ghost"
+                                :disabled="mod.mutating || modDisabledFiles.length === 0"
+                                @click="enableAll"
+                            >
+                                全部启用
+                            </GroupButton>
+                        </div>
+
+                        <ul class="setting__mods">
+                            <li v-for="row in modRows" :key="row.filename" class="setting__mod">
+                                <span class="setting__mod-body">
+                                    <span class="setting__mod-head">
+                                        <span class="setting__mod-title" :title="row.filename">
+                                            {{ modTitleOf(row) }}
+                                        </span>
+                                        <span class="setting__mod-tags">
+                                            <span
+                                                class="setting__tag"
+                                                :class="{ 'setting__tag--off': !row.enabled }"
+                                            >
+                                                {{ row.enabled ? '启用' : '禁用' }}
+                                            </span>
+                                            <span class="setting__tag">{{
+                                                sizeText(row.size)
+                                            }}</span>
+                                            <span v-if="!row.resolved" class="setting__tag"
+                                                >未反查</span
+                                            >
+                                        </span>
+                                    </span>
+                                    <span
+                                        v-if="modSubtitleOf(row).length > 0"
+                                        class="setting__mod-desc"
+                                    >
+                                        {{ modSubtitleOf(row) }}
+                                    </span>
+                                </span>
+                                <GroupButton
+                                    variant="ghost"
+                                    :disabled="mod.mutating"
+                                    @click="toggleMod(row)"
+                                >
+                                    {{ row.enabled ? '禁用' : '启用' }}
+                                </GroupButton>
+                            </li>
+                        </ul>
+                    </template>
+
+                    <p v-if="mod.mutationFailure !== null" class="setting__failure">
+                        <span class="setting__failure-code">操作失败</span>
+                        <span class="setting__failure-detail">
+                            {{ modFailureText(mod.mutationFailure) }}
+                            <template v-if="mod.mutationFailure.detail">
+                                · {{ mod.mutationFailure.detail }}
+                            </template>
+                        </span>
+                    </p>
+
+                    <p v-if="vanilla" class="setting__note">原版实例，MOD 不加载</p>
+
+                    <p class="setting__note">
+                        mod list --folder {{ folderId || '<文件夹>' }} --version {{ info.id }} ·
+                        启用 / 禁用改文件名后缀
+                    </p>
+                </template>
             </CollapsibleGroup>
 
             <CollapsibleGroup label="内存" default-open>
@@ -575,6 +877,10 @@ watch(instanceId, load)
 
     max-width: 46rem;
     padding: 1.5rem;
+
+    // 可点元素的底：与分组内容区差 8% / 16%
+    --clickable-bg: color-mix(in srgb, var(--text-color) 8%, var(--group-content-bg));
+    --clickable-bg-hover: color-mix(in srgb, var(--text-color) 16%, var(--group-content-bg));
 }
 
 .setting__head {
@@ -663,6 +969,90 @@ watch(instanceId, load)
     font-size: var(--font-size-xs);
 
     word-break: break-all;
+}
+
+// 行内切换按钮与文字居中对齐
+.setting__mod > .group-button {
+    align-self: center;
+}
+
+/* MOD 行：标题与标签一列，切换按钮一列 */
+.setting__mods {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+
+    max-height: 22rem;
+    margin: 0;
+    padding: 0;
+
+    overflow: auto;
+    // 滚到两端不带动外层页面
+    overscroll-behavior: contain;
+
+    list-style: none;
+}
+
+.setting__mod {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    padding: 0.35rem 0.5rem;
+
+    font-size: var(--font-size-sm);
+
+    background-color: var(--clickable-bg);
+    border-radius: var(--border-radius);
+}
+
+.setting__mod-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.2rem;
+
+    min-width: 0;
+}
+
+.setting__mod-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.setting__mod-title {
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.setting__mod-desc {
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    word-break: break-all;
+}
+
+.setting__mod-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.setting__tag {
+    padding: 0.05rem 0.4rem;
+
+    color: var(--text-color-dark);
+    font-size: var(--font-size-xs);
+
+    background-color: var(--clickable-bg-hover);
+    border-radius: calc(var(--border-radius) / 2);
+}
+
+// 禁用态标签
+.setting__tag--off {
+    color: color-mix(in srgb, #c62828 78%, var(--text-color));
 }
 
 /* 危险动作那一行 */
