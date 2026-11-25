@@ -35,7 +35,7 @@ const app = createApp(App)
 
 app.use(Vue3Toastify, {
     autoClose: 3000,
-    position: 'top-center',
+    position: 'top-right',
     theme: 'auto', // 'light' | 'dark' | 'colored' | 'auto'
     clearOnUrlChange: false,
     // 不显示关闭按钮，全部自动关闭；点击正文由 notify 助手接管为复制

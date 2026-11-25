@@ -53,7 +53,7 @@ async function copy(text: string): Promise<void> {
         autoClose: 1500,
         closeButton: false,
         closeOnClick: false,
-        position: 'bottom-center',
+        position: 'top-right',
     })
 }
 
